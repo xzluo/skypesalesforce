@@ -1,0 +1,59 @@
+body {
+    font: 11pt calibri;
+}
+
+a {
+    font-weight: bold;
+}
+
+a:hover {
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.input {
+    border: 1pt solid gray;
+    padding: 2pt;
+    overflow: hidden;
+    white-space: nowrap;
+}
+
+.button {
+    border: 1pt solid gray;
+    cursor: pointer;
+    padding: 2pt 5pt;
+    display: inline-block;
+}
+
+.button:hover {
+    background: lightgray;
+}
+
+.signinframe, .meetingOptions, .actions {
+    padding: 20pt 30%;
+}
+
+.signinframe > div, .meetingOptions > div, .actions > div {
+    margin-bottom: 3pt;
+}
+
+.buttons {
+    margin-top: 8pt;
+}
+
+.message {
+    margin-top: 4pt;
+}
+
+.message .sender {
+    font-weight: bold;
+}
+
+#chatinput {
+    margin-top: 10pt;
+    border: 1pt solid gray;
+}
+
+.meetingOptions, .actions, .messaging {
+    display: none;
+}
