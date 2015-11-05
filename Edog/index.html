@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+    <head>
+        <title>Sign-In SkypeWeb Sample (EDog)</title>
+        <!-- SkypeWeb library requires IE compatible mode turned off -->
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+
+        <link rel="shortcut icon" href="//www.microsoft.com/favicon.ico?v2">
+        <link href="index.css" rel="stylesheet">
+
+        <!-- reference to jCafe JavaScript library and the jQuery library written by John Resig (MIT license) -->
+        <script src="http://ajax.aspnetcdn.com/ajax/jQuery/jquery-1.10.2.min.js"></script>
+
+        <script src="q.js"></script>
+        <script src="webticket.js"></script>
+
+        <!-- the SDK -->
+        <script src="skypeweb.js"></script>
+
+        <!-- index.js is just a sample that demonstrates how to use lync.js -->
+        <script src="index.js"></script>
+    </head>
+    <body>
+        <div class="signinframe">
+            <div>Login</div>
+            <div id="username" contenteditable="true" class="input">cafe6@devex.ccsctp.net</div>
+
+            <div>Password</div>
+            <div id="password" contenteditable="true" class="input">07Apples</div>
+
+            <div id="waiting">please wait for a while ...</div>
+
+            <div id="signin" class="button">Sign-in</div>
+            <div id="signout" class="button">Sign-out</div>
+
+            <div>Client State</div>
+            <div id="client_state" contenteditable="false" class="input"></div>
+        </div>
+    </body>
+</html>
