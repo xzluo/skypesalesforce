@@ -1,87 +1,78 @@
-/**
- * This script demonstrates how to sign the user in and how to sign it out.
- */
-$(function () {
-    'use strict';
+'use strict';
 
-    // create an instance of the Application object;
-    // note, that different instances of Client may
-    // represent different users
-    var client = new Skype.Web.Model.Application;
+var fqdn = 'devex.ccsctp.net';
+var origins = [{
+    origin: 'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root?originalDomain=' + fqdn,
+    xframe: 'https://webdir.tip.lync.com/xframe'
+}];
 
-    // whenever client.state changes, display its value
-    client.signInManager.state.changed(function (state) {
-        $('#client_state').text(state);
-    });
+var app;
+var url = window.location.toString();
+var query_string = url.split('?');
+var query = {};
+var params = {};
+var bid;
+var sclProxy;
+var sclProxy2;
+var sclProxy3;
+var jCafeDriverUrl = 'http://localhost/';
+var proxySocket;
 
-    window.webTicketReady = function () {
-        $('#waiting').text('READY To Start Sign In :)');
+function initLocalApp() {
+    if (app && app.application().signInManager.state() != 'SignedOut') {
+        app.application().signInManager.signOut().then(function () {
+            initLocalAppInternal();
+        })
+    } else {
+        initLocalAppInternal();
     }
+}
 
-    // when the user clicks on the "Sign In" button
-    $('#signin').click(function () {
-        var uri = $('#username').text();
-        var username = uri;
-        var password = $('#password').text();
-        var topoParams = {
-            domainName: 'devex.ccsctp.net',
-            authType: 'oauth',
-            clientID: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
-            resourceAppIdUrl: 'https://webdir0d.tip.lync.com',
-            authorityUrl: 'https://login.windows-ppe.net/common/oauth2/authorize/',
-            ucwaServerFQDN: 'https://webdir0d.tip.lync.com',
-            origins: [{
-                origin: 'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root?originalDomain=devex.ccsctp.net',
-                xframe: 'https://webdir0d.tip.lync.com/xframe'
-            }]
-        };
+// Telemetry Logger using Aria Library
+function TelemetryManager() {
+    var logger;
+    
+    function init(tenantId) {
+        microsoft.applications.telemetry.LogManager.initialize(tenantId);
+        logger = new microsoft.applications.telemetry.Logger();
+    }
+    
+    function sendEvent(tenantId, eventName, options) {
+        if (!logger) {
+            init(tenantId);
+        }
+        logger.logEvent(eventName, [options]);
+    }
+    
+    return {
+        sendEvent: sendEvent
+    }
+}
 
-        var userParams = {
-            uri: uri,
-            username: username,
-            password: password
-        };
 
-        var webTicket;
+function initLocalAppInternal() {
+    // app = new JCafe(new Application());
+    app = new JCafe(new Application({telemetryManager: new TelemetryManager()}));
+    app.on('event', function (data) {
+        console.log('[app] ', data);
+    })
 
-        getWebTicket(topoParams, userParams).then(function (ticket) {
-            webTicket = ticket;
+    app.init();
+}
 
-            $('#waiting').text('Obtained web ticket, started signing in ... :)')
-            function auth(token) {
-                var access_token = token;
-                return function auth(req, send) {
-                    if (req.url.indexOf('/ucwa') === 0 || req.url.indexOf(topoParams.ucwaServerFQDN) === 0) {
-                        req.headers['Authorization'] = 'Bearer ' + access_token.trim();
-                    }
-                    return send(req);
-                }
-            }
+function initRemoteApp(id) {
+    SCL2Remote(jCafeDriverUrl, id);
+}
 
-            client.signInManager.signIn({
-                auth: auth(webTicket),
-                origins: topoParams.origins
-            }).then(function () {
-                // when the sign in operation succeeds display the user name
-                alert('Signed in as ' + client.personsAndGroupsManager.mePerson.displayName());
-            }, function (error) {
-                // if something goes wrong in either of the steps above,
-                // display the error message
-                alert(error || 'Cannot sign in');
-            });
-        });
+function initTest(id) {
+    proxySocket = io.connect('http://localhost/');
+    proxySocket.on('connect', function () {
+        sclProxy = SCL2Proxy(proxySocket, 'e2', id);
+        sclProxy.register();
+        sclProxy3 = SCL2Proxy(proxySocket, 'e3', id);
+        //sclProxy3.register();
     });
 
-    // when the user clicks on the "Sign Out" button
-    $('#signout').click(function () {
-        // start signing out
-        client.signInManager.signOut()
-            .then(function () {
-                // and report the success
-                alert('Signed out');
-            }, function (error) {
-                // or a failure
-                alert(error || 'Cannot sign out');
-            });
-    });
-});
+}
+
+initLocalApp();

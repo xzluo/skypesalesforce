@@ -14,14 +14,28 @@ body {
     cursor: pointer;
     padding: 2pt 5pt;
     display: inline-block;
+    background-color: lightcyan;
 }
 
-    .button:hover {
-        background: lightgray;
-    }
+.enabled {
+    background: lightskyblue;
+}
+
+.enabled:hover {
+    background-color: lightcyan;
+}
+
+.disabled {
+    background-color: slategray;
+}
+
+.disabled:hover {
+    background-color: lightslategray;
+}
 
 .signinframe {
-    padding: 20pt 30%;
+    width: 1000px;
+    padding: 20pt;
 }
 
     .signinframe > div {
@@ -30,4 +44,19 @@ body {
 
     .signinframe > .button {
         margin-top: 8pt;
+    }
+
+
+    [contenteditable="true"].single-line {
+        white-space: nowrap;
+        width:200px;
+        overflow: hidden;
+    } 
+    [contenteditable="true"].single-line br {
+        display:none;
+
+    }
+    [contenteditable="true"].single-line * {
+        display:inline;
+        white-space:nowrap;
     }

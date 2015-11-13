@@ -1,40 +1,946 @@
-<!doctype html>
+﻿<!DOCTYPE html>
 <html>
+    
     <head>
-        <title>Sign-In SkypeWeb Sample (EDog)</title>
-        <!-- SkypeWeb library requires IE compatible mode turned off -->
-        <meta http-equiv="X-UA-Compatible" content="IE=edge">
-
-        <link rel="shortcut icon" href="//www.microsoft.com/favicon.ico?v2">
-        <link href="index.css" rel="stylesheet">
-
-        <!-- reference to jCafe JavaScript library and the jQuery library written by John Resig (MIT license) -->
-        <script src="http://ajax.aspnetcdn.com/ajax/jQuery/jquery-1.10.2.min.js"></script>
-
+        <meta charset="utf-8" />
+        <title>jCafe App</title>
+        <link href="index.css" rel="stylesheet" />
+        <script src="/socket.io/socket.io.js"></script>
+        <script src="../OneMachineAutomation/Jasmine/lib/jasmine-1.3.0/jasmine.js"></script>
+        <script src="../OneMachineAutomation/Jasmine/lib/jasmine-1.3.0/jasmine-html.js"></script>
+        <script src="./aria-web-telemetry-2.1.3.min.js"></script>
+        <script src="../../target/skypeweb.js"></script>
+        <script src="jquery.js"></script>
         <script src="q.js"></script>
-        <script src="webticket.js"></script>
-
-        <!-- the SDK -->
-        <script src="skypeweb.js"></script>
-
-        <!-- index.js is just a sample that demonstrates how to use lync.js -->
+        <script src="eventemitter.js"></script>
+        <script src="jcafe.js"></script>
+        <script src="scl2.js"></script>
         <script src="index.js"></script>
     </head>
+    
     <body>
         <div class="signinframe">
-            <div>Login</div>
-            <div id="username" contenteditable="true" class="input">cafe6@devex.ccsctp.net</div>
-
+            <div>
+                <h3>Login:</h3>
+            </div>
+            <div>UserName</div>
+            <div id="username" contenteditable="true" class="input">skypebot1@metio.ms</div>
             <div>Password</div>
-            <div id="password" contenteditable="true" class="input">07Apples</div>
-
-            <div id="waiting">please wait for a while ...</div>
-
-            <div id="signin" class="button">Sign-in</div>
-            <div id="signout" class="button">Sign-out</div>
-
-            <div>Client State</div>
-            <div id="client_state" contenteditable="false" class="input"></div>
+            <div id="password" contenteditable="true" class="input">Skype4fun!</div>
+            <div>Tab Id</div>
+            <div id="tabId" contenteditable="true" class="input">9b0fdb2a252c4aca56847b17d11c5e5a</div>
+            <div>
+                <span class="enabled"><input type="radio" name="auth" value="basic" checked>basic</span>
+                <span class="enabled"><input type="radio" name="auth" value="implicit">implicit</span>
+                <span id="authCafe1" class="disabled"><input type="radio" name="auth" value="cafe1" disabled>cafe11@devex.ccsctp.net</span>
+                <span id="authCafe2" class="disabled"><input type="radio" name="auth" value="cafe2" disabled>cafe12@devex.ccsctp.net</span>
+                <span id="authCafe3" class="disabled"><input type="radio" name="auth" value="cafe3" disabled>cafe13@devex.ccsctp.net</span>
+            </div>
+            <div id="signIn" class="button enabled">SignIn</div>
+            <div id="signInAnony" class="button enabled">SignInAnony</div>
+            <div id="signOut" class="button enabled">SignOut</div>
+            <div id="snapshot-reload" class="button enabled">take a snapshot and reload page</div>
+            <div id="signInWithSnapshot" class="button enabled">SignIn with Snapshot</div>
+            <div id="signInWithSnapshotNOPII" class="button enabled">SignIn with Snapshot (NOPII)</div>
+            <br />
+            <div id="applicationState">SignedOut</div>
+            <select id="myAvailability" class="disabled">
+                <option value="Online">Online</option>
+                <option value="Busy">Busy</option>
+                <option value="BeRightBack">BeRightBack</option>
+                <option value="Away">Away</option>
+                <option value="DoNotDisturb">DoNotDisturb</option>
+                <option value="Reset" selected="selected">Reset ...</option>
+            </select>
+            <hr />
+            <div id="location" contenteditable="true" class="input single-line">teamspace</div>
+            <div id="setLocation" class="button enabled">Set Location</div>
+            <hr />
+            <div id="personUri" contenteditable="true" class="input">sip:wewa2@clientsemain.rtmp.selfhost.corp.microsoft.com</div>
+            <div id="subscribe" class="button enabled">subscribe</div>
+            <div id="unsubscribe" class="button enabled">unsubscribe</div>
+            <hr />
+            <div>
+                <h3>A/V Devices</h3>
+            </div>
+            <div>Selected Microphone:</div>
+            <select id="selectedMicrophone"></select>
+            <div>Selected Speaker:</div>
+            <select id="selectedSpeaker"></select>
+            <div>Selected Camera:</div>
+            <select id="selectedCamera"></select>
+            <hr />
+            <div>
+                <h3>Conversation:</h3>
+            </div>
+            <div id="fetchConversations" class="button enabled">fetch Conversations</div>
+            <div>Helpdesk number:</div>
+            <div id="helpdesk" contenteditable="true" class="input">+18665394191</div>
+            <div id="callhelpdesk" class="button disabled">call helpdesk</div>
+            <div>participant #1</div>
+            <div id="participant" contenteditable="true" class="input">sip:cafe12@devex.ccsctp.net</div>
+            <div id="createP2PConversation" class="button disabled">createP2PConversation</div>
+            <div>participant #2</div>
+            <div id="participant2" contenteditable="true" class="input">sip:cafe13@devex.ccsctp.net</div>
+            <div id="createAdhocMeeting" class="button disabled">createAdhocMeeting</div>
+            <div id="createAdhocMeetingWithParty1and2" class="button disabled">createMeeting</div>
+            <div>meeting uri</div>
+            <div id="meetingUri" contenteditable="true" class="input">sip:skypebot2@metio.net;gruu;opaque=app:conf:focus:id:ZLD98SCY</div>
+            <div>topic</div>
+            <div id="topic" contenteditable="true" class="input">P2P topic</div>
+            <div>context</div>
+            <div id="context" contenteditable="true" class="input">invite context</div>
+            <div id="joinMeetingConversation" class="button disabled">joinMeeting</div>
+            <div id="inviteParticipant1" class="button disabled">inviteParticipant1</div>
+            <div id="inviteParticipant2" class="button disabled">inviteParticipant2</div>
+            <br />
+            <div id="leaveConversation" class="button enabled">leaveConversation</div>
+            <div id="removeConversation" class="button enabled">removeConversation</div>
+            <br />
+            <hr />
+            <div>
+                <h3>Chat Service:</h3>
+            </div>
+            <div id="startChatService" class="button disabled">start</div>
+            <div id="stopChatService" class="button disabled">stop</div>
+            <div id="acceptChatService" class="button disabled">accept</div>
+            <div id="rejectChatService" class="button disabled">reject</div>
+            <div id="autoAcceptChatService" class="button enabled">autoAccept</div>
+            <br />
+            <div>Outbound IM message</div>
+            <div id="outboundMessage" contenteditable="true" class="input">Hello, world.</div>
+            <div id="sendMessage" class="button disabled">sendMessage</div>
+            <div id="sendIsTyping" class="button disabled">sendIsTyping</div>
+            <br />
+            <br />
+            <div>Inbound IM message</div>
+            <div id="inboundMessage" contenteditable="true" class="input"></div>
+            <br />
+            <hr />
+            <div>
+                <h3>Audio Service:</h3>
+            </div>
+            <div id="startAudioService" class="button disabled">start</div>
+            <div id="stopAudioService" class="button disabled">stop</div>
+            <div id="acceptAudioService" class="button disabled">accept</div>
+            <div id="rejectAudioService" class="button disabled">reject</div>
+            <div id="autoAcceptAudioService" class="button enabled">autoAccept</div>
+            <br />
+            <div id="tone_0" class="button">0</div>
+            <div id="tone_1" class="button">1</div>
+            <div id="tone_2" class="button">2</div>
+            <div id="tone_3" class="button">3</div>
+            <br />
+            <div id="tone_4" class="button">4</div>
+            <div id="tone_5" class="button">5</div>
+            <div id="tone_6" class="button">6</div>
+            <div id="tone_7" class="button">7</div>
+            <br />
+            <div id="tone_8" class="button">8</div>
+            <div id="tone_9" class="button">9</div>
+            <div id="tone_Star" class="button">*</div>
+            <div id="tone_Pound" class="button">#</div>
+            <br />
+            <div id="tone_A" class="button">A</div>
+            <div id="tone_B" class="button">B</div>
+            <div id="tone_C" class="button">C</div>
+            <div id="tone_D" class="button">D</div>
+            <br />
+            <div id="tone_Flash" class="button">Flash</div>
+            <br />
+            <div>
+                <h3>SelfParticipant Audio:</h3>
+            </div>
+            <div id="mute" class="button">mute</div>
+            <div id="unmute" class="button">unmute</div>
+            <div id="hold" class="button">hold</div>
+            <div id="unhold" class="button">unhold</div>
+            <div id="transfer" class="button">transfer</div>
+            <hr />
+            <div>
+                <h3>Video Service:</h3>
+            </div>
+            <div id="startVideoService" class="button enabled">start</div>
+            <div id="stopVideoService" class="button enabled">stop</div>
+            <div id="acceptVideoService" class="button enabled">accept</div>
+            <div id="rejectVideoService" class="button enabled">reject</div>
+            <div id="autoAcceptVideoService" class="button enabled">autoAccept</div>
+            <span>
+                <input id="autoShowParticipantVideo" class="input" type="checkbox" />auto show participants video</span>
+            <br />
+            <br />
+            <table id="renderTable">
+                <tr>
+                    <td>
+                        <div id="showP0Video" class="button enabled">show video</div>
+                        <div id="hideP0Video" class="button enabled">hide video</div>
+                        <br />
+                        <span>participant #0</span>
+                    </td>
+                    <td>
+                        <div id="showP1Video" class="button enabled">show video</div>
+                        <div id="hideP1Video" class="button enabled">hide video</div>
+                        <br />
+                        <span>participant #1</span>
+                    </td>
+                    <td>
+                        <div id="showP2Video" class="button enabled">show video</div>
+                        <div id="hideP2Video" class="button enabled">hide video</div>
+                        <br />
+                        <span>participant #2</span>
+                    </td>
+                    <td>
+                        <div id="showP3Video" class="button enabled">show video</div>
+                        <div id="hideP3Video" class="button enabled">hide video</div>
+                        <br />
+                        <span>participant #3</span>
+                    </td>
+                </tr>
+                <tr>
+                    <td id="renderWindow0" style="background: blue; width: 320px; height: 160px; "></td>
+                    <td id="renderWindow1" style="background: blue; width: 320px; height: 160px; "></td>
+                    <td id="renderWindow2" style="background: blue; width: 320px; height: 160px; "></td>
+                    <td id="renderWindow3" style="background: blue; width: 320px; height: 160px; "></td>
+                </tr>
+            </table>
+            <br />
+            <div id="showMyVideo" class="button" enabled>Show My V</div>
+            <div id="hideMyVideo" class="button" enabled>Hide My V</div>
+            <div id="previewWindow" style="background: green; width: 240px; height: 180px"></div>
+            <br />
+            <div>
+                <h3>SelfParticipant Video:</h3>
+            </div>
+            <hr />
         </div>
+        <script>
+            var _gConversation;
+            var _gPerson1, _gPerson2, _gHelpdesk;
+            var subscription1, subscription2;
+            
+            Q.onerror = function (e) {
+                alert('Q.onerror - \ncode: ' + e.code + '\nmessage: ' + e.message + '\nstack: ' + e.stack);
+            }
+    
+            $(function () {
+                var lblSignIn = $('#applicationState');
+    
+                function setEnabled(obj, enabled) {
+                    enabled ? obj.removeClass('disabled').addClass('enabled') : obj.removeClass('enabled').addClass('disabled');
+                }
+    
+                /******** app ********/
+                function init() {
+                    _gConversation = null;
+                    _gPerson1 = null;
+                    _gPerson2 = null;
+                    _gHelpdesk = null;
+                    app.on('event', function (data) {
+                        if (data.t == 'EnabledChanged') {
+                            if (data.s.match(/_SignIn/)) setEnabled($('#signIn'), data.enabled);
+                            if (data.s.match(/_SignOut/)) setEnabled($('#signOut'), data.enabled);
+    
+                            if (data.s.match(/_ChatServiceStart/)) setEnabled($('#startChatService'), data.enabled);
+                            if (data.s.match(/_ChatServiceStop/)) setEnabled($('#stopChatService'), data.enabled);
+                            if (data.s.match(/_ChatServiceAccept/)) setEnabled($('#acceptChatService'), data.enabled);
+                            if (data.s.match(/_ChatServiceReject/)) setEnabled($('#rejectChatService'), data.enabled);
+                            if (data.s.match(/_ChatServiceSendMessage/)) setEnabled($('#sendMessage'), data.enabled);
+                            if (data.s.match(/_ChatServiceSendIsTyping/)) setEnabled($('#sendIsTyping'), data.enabled);
+    
+                            if (data.s.match(/_AudioServiceStart/)) setEnabled($('#startAudioService'), data.enabled);
+                            if (data.s.match(/_AudioServiceStop/)) setEnabled($('#stopAudioService'), data.enabled);
+                            if (data.s.match(/_AudioServiceAccept/)) setEnabled($('#acceptAudioService'), data.enabled);
+                            if (data.s.match(/_AudioServiceReject/)) setEnabled($('#rejectAudioService'), data.enabled);
+                            if (data.s.match(/_AudioServiceSendDtmf/)) setEnabled($('#sendDtmf'), data.enabled);
+    
+                            //if (data.s.match(/_VideoServiceStart/)) setEnabled($('#startVideoService'), data.enabled);
+                            //if (data.s.match(/_VideoServiceStop/)) setEnabled($('#stopVideoService'), data.enabled);
+                            //if (data.s.match(/_VideoServiceAccept/)) setEnabled($('#acceptVideoService'), data.enabled);
+                            //if (data.s.match(/_VideoServiceReject/)) setEnabled($('#rejectVideoService'), data.enabled);
+                        } else if (data.t == 'StateChanged' && data.s.match(/_SignInManager$/)) {
+                            if (data.state == 'SignedIn') {
+                                lblSignIn.text('Signed in as ' + app.application().personsAndGroupsManager.mePerson.displayName());
+    
+                                app.application().personsAndGroupsManager.mePerson.status.changed(function (s) {
+                                    $("#myAvailability").val(s);
+                                })
+    
+                                app.application().personsAndGroupsManager.mePerson.location.changed(function (location) {
+                                    $('#location').val(location);
+                                });
+    
+                                setEnabled($('#myAvailability'), true);
+                                setEnabled($('#callhelpdesk'), true);
+                                setEnabled($('#createP2PConversation'), true);
+                                setEnabled($('#createAdhocMeetingWithParty1and2'), true);
+                                setEnabled($('#createAdhocMeeting'), true);
+                                setEnabled($('#joinMeetingConversation'), true);
+                                setEnabled($('#inviteParticipant2'), true);
+                                setEnabled($('#inviteParticipant1'), true);
+                                setEnabled($('#leaveConversation'), true);
+                                setEnabled($('#removeConversation'), true);
+    
+                                // cameras
+                                app.application().devicesManager.cameras.added(function (camera) {
+                                    $('#selectedCamera').append($('<option/>', {
+                                        value: camera.id(),
+                                        text: camera.id()
+                                    }));
+                                })
+    
+                                app.application().devicesManager.cameras.removed(function (camera) {
+                                    $('#selectedCamera option[value="' + camera.id() + '"]')[0].remove();
+                                })
+    
+                                app.application().devicesManager.cameras.subscribe();
+    
+                                $('#selectedCamera').change(function () {
+                                    var camera = $('#selectedSpeaker option:selected').val();
+                                    var cams = app.application().devicesManager.cameras().filter(function (cam) {
+                                        return cam.id() == camera;
+                                    });
+    
+                                    if (cams.length > 0) {
+                                        app.application().devicesManager.selectedCamera.set(cams[0]);
+                                    }
+                                })
+    
+                                // speakers
+                                app.application().devicesManager.speakers.added(function (speaker) {
+                                    $('#selectedSpeaker').append($('<option/>', {
+                                        value: speaker.id(),
+                                        text: speaker.id()
+                                    }));
+                                })
+    
+                                app.application().devicesManager.speakers.removed(function (speaker) {
+                                    $('#selectedSpeaker option[value="' + speaker.id() + '"]')[0].remove();
+                                })
+    
+                                app.application().devicesManager.speakers.subscribe();
+    
+                                $('#selectedSpeaker').change(function () {
+                                    var speaker = $('#selectedSpeaker option:selected').val();
+                                    var spks = app.application().devicesManager.speakers().filter(function (spk) {
+                                        return spk.id() == speaker;
+                                    });
+    
+                                    if (spks.length > 0) {
+                                        app.application().devicesManager.selectedSpeaker.set(spks[0]);
+                                    }
+                                })
+    
+                                // microphones
+                                app.application().devicesManager.microphones.added(function (microphone) {
+                                    $('#selectedMicrophone').append($('<option/>', {
+                                        value: microphone.id(),
+                                        text: microphone.id()
+                                    }));
+                                })
+                                app.application().devicesManager.microphones.removed(function (microphone) {
+                                    $('#selectedMicrophone option[value="' + microphone.id() + '"]')[0].remove();
+                                })
+    
+                                app.application().devicesManager.microphones.subscribe();
+    
+                                $('#selectedMicrophone').change(function () {
+                                    var mic = $('#selectedMicrophone option:selected').val();
+                                    var ms = app.application().devicesManager.microphones().filter(function (m) {
+                                        return m.id() == mic;
+                                    });
+                                    if (ms.length > 0) {
+                                        app.application().devicesManager.selectedMicrophone.set(ms[0]);
+                                    }
+                                })
+                            }
+                            else {
+                                lblSignIn.text(data.state);
+                                setEnabled($('#myAvailability'), false);
+                                setEnabled($('#callhelpdesk'), false);
+                                setEnabled($('#createP2PConversation'), false);
+                                setEnabled($('#createAdhocMeetingWithParty1and2'), false);
+                                setEnabled($('#createAdhocMeeting'), true);
+                                setEnabled($('#joinMeetingConversation'), false);
+                                setEnabled($('#inviteParticipant1'), false);
+                                setEnabled($('#inviteParticipant2'), false);
+                                setEnabled($('#leaveConversation'), false);
+                                setEnabled($('#removeConversation'), false);
+                            }
+                        } else if (data.t == 'ConversationAdded') {
+                            _gConversation = data.context.conversation;
+                        } else if (data.t == 'ActivityItemAdded' && data.type == 'TextMessage' && data.direction == 'Incoming') {
+                            $('#inboundMessage').text(data.item.sender.displayName() + " -> " + data.item.text());
+                        } else if (data.t == 'SelectedMicrophoneChanged') {
+                            $("#selectedMicrophone").val(data.selectedMicrophone.id());
+                        } else if (data.t == 'SelectedSpeakerChanged') {
+                            $("#selectedSpeaker").val(data.selectedSpeaker.id());
+                        } else if (data.t == 'SelectedCameraChanged') {
+                            $("#selectedCamera").val(data.selectedCamera.id());
+                        } else if (data.t === "StateChanged" && data.s.match(/_ParticipantVideo$/) && data.state === "Connected") {
+                            return;
+                            setTimeout(function () {
+                                data.context.participant.video.channels(0).stream.source.sink.container.set(document.getElementById("renderWindow0")).then(function () {
+                                    data.context.participant.video.channels(0).isStarted(true);
+                                });
+                            }, 1000);
+                        } else if (data.t === "StateChanged" && data.s.match(/_SelfParticipantVideo$/) && data.state === "Connected") {
+                            setTimeout(function () {
+                                data.context.conversation.selfParticipant.video.channels(0).stream.source.sink.container.set(document.getElementById("previewWindow")).then(function () {
+                                    data.context.conversation.selfParticipant.video.channels(0).isStarted(true);
+                                });
+                            }, 0);
+                        }
+                    })
+                }
+                init();
+    
+                $('#myAvailability').change(function (w) {
+                    var status = $('#myAvailability option:selected').val();
+                    if (status == 'Reset') {
+                        SCL2.resetMePersonStatus(app).done();
+                    } else {
+                        SCL2.setMePersonStatus(app, status).done();
+                    }
+                });
+    
+                $('#location').keyup(function (e) {
+                    if (e.keyCode == 13) {
+                        //execute command
+                        var cline = $('#location').text().trim().toLowerCase();
+                        var cmd = cline.match(/\S+/gmi);
+                        var snapshot = JSON.parse(localStorage['snapshot']);
+    
+                        switch (cmd[0]) {
+                            case 'snapshot':
+                                switch (cmd[1]) {
+                                    case 'delete':
+                                        if (cmd[2] == 'conversation') {
+                                            // delete conversation from snapshot
+                                            delete snapshot.conversation;
+                                        } else if (cmd[2] == 'participant') {
+                                            delete snapshot.participant;
+                                        }
+                                        localStorage['snapshot'] = JSON.stringify(snapshot);
+                                        break;
+                                }
+                                break;
+                        }
+                    }
+                });
+    
+                $('#setLocation').click(function () {
+                    var location = $('#location').text();
+    
+                    return SCL2.setMePersonLocation(app, location).done();
+                });
+    
+                /******** Conversation ********/
+                function searchForOnePerson(text) {
+                    return SCL2.searchForPerson(app, { text: text, limit: 1 }).then(function (persons) {
+                        if (persons.length > 0) {
+                            return persons[0].result;
+                        } else {
+                            throw new Exception("could not find a person.");
+                        }
+                    });
+                }
+    
+                $('#fetchConversations').click(function () {
+                    app.application().conversationsManager.conversations.get().then(function (c) {
+                        console.log('Fetched Conversations: ', c[0]);
+                    });
+                });
+    
+                $('#createP2PConversation').click(function () {
+                    var uri = $('#participant').text();
+    
+                    var topic = $('#topic').text();
+    
+                    return SCL2.getConversation(app, uri).then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                $('#createAdhocMeetingWithParty1and2').click(function () {
+                    var uri1;
+                    var uri2;
+
+                    SCL2.createConversation(app, [$('#participant').text(), $('#participant2').text()], 'topic')
+                        .then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                $('#createAdhocMeeting').click(function () {
+                    SCL2.createConversation(app, [], 'topic')
+                        .then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                $('#joinMeetingConversation').click(function () {
+                    SCL2.joinMeetingConversation(app, $('#meetingUri').text()).then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                })
+    
+                $('#callhelpdesk').click(function () {
+                    searchForOnePerson($('#helpdesk').text()).then(function (person) {
+                        _gHelpdesk = person;
+                        return SCL2.createConversation(app, [person]);
+                    }).then(function (conversation) {
+                        _gConversation = conversation;
+                        return SCL2.startAudioService(app, conversation);
+                    }).done();
+                });
+    
+                $('#inviteParticipant1').click(function () {
+                    if (!_gConversation) return;
+    
+                    return SCL2.addParticipant(app, _gConversation, $('#participant').text());
+                });
+    
+                $('#inviteParticipant2').click(function () {
+                    if (!_gConversation) return;
+    
+                    return SCL2.addParticipant(app, _gConversation, $('#participant2').text());
+                });
+
+                $('#leaveConversation').click(function () {
+                    _gConversation && SCL2.leaveConversation(app, _gConversation).done();
+                });
+    
+                $('#removeConversation').click(function () {
+                    if (_gConversation) {
+                        SCL2.removeConversation(app, _gConversation).then(function () {
+                            _gConversation = null;
+                        }).done();
+                    }
+                });
+    
+                /******** Chat ********/
+                $('#startChatService').click(function () {
+                    if (_gConversation)
+                        SCL2.startChatService(app, _gConversation).done();
+                });
+    
+                $('#stopChatService').click(function () {
+                    if (_gConversation) {
+                        SCL2.stopChatService(app, _gConversation).done();
+                    }
+                });
+    
+                $('#acceptChatService').click(function () {
+                    if (_gConversation) {
+                        SCL2.acceptChatService(app, _gConversation).done();
+                    }
+                });
+    
+                $('#rejectChatService').click(function () {
+                    if (_gConversation) {
+                        SCL2.rejectChatService(app, _gConversation).done();
+                    }
+                });
+
+                $('#sendMessage').click(function () {
+                    var message = $('#outboundMessage').text();
+                    if (_gConversation) {
+                        SCL2.sendMessage(app, _gConversation, message).done();
+                    }
+                });
+    
+                $('#sendIsTyping').click(function () {
+                    if (_gConversation) {
+                        SCL2.sendIsTyping(app, _gConversation).done();
+                    }
+                });
+    
+                $('#autoAcceptChatService').click(function () {
+                    SCL2.waitForChatNotifiedThenAccept(app).then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                /******** Audio ********/
+                $('#startAudioService').click(function () {
+                    if (_gConversation)
+                        return SCL2.startAudioService(app, _gConversation).done();
+                });
+    
+                $('#acceptAudioService').click(function () {
+                    if (_gConversation)
+                        return SCL2.acceptAudioService(app, _gConversation).done();
+                });
+    
+                $('#rejectAudioService').click(function () {
+                    if (_gConversation)
+                        return SCL2.rejectAudioService(app, _gConversation).done();
+                })
+    
+                $('#stopAudioService').click(function () {
+                    if (_gConversation)
+                        return SCL2.stopAudioService(app, _gConversation).done();
+                })
+    
+                $('#autoAcceptAudioService').click(function () {
+                    SCL2.waitForAudioNotifiedThenAccept(app).then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                function sendTone(b) {
+                    var t = b.target.id.split('_')[1];
+                    if (_gConversation) {
+                        SCL2.sendDtmf(app, _gConversation, t).done();
+                    }
+                }
+    
+                $('#tone_0').click(sendTone);
+                $('#tone_1').click(sendTone);
+                $('#tone_2').click(sendTone);
+                $('#tone_3').click(sendTone);
+                $('#tone_4').click(sendTone);
+                $('#tone_5').click(sendTone);
+                $('#tone_6').click(sendTone);
+                $('#tone_7').click(sendTone);
+                $('#tone_8').click(sendTone);
+                $('#tone_9').click(sendTone);
+                $('#tone_Star').click(sendTone);
+                $('#tone_Pound').click(sendTone);
+                $('#tone_A').click(sendTone);
+                $('#tone_B').click(sendTone);
+                $('#tone_C').click(sendTone);
+                $('#tone_D').click(sendTone);
+                $('#tone_Flash').click(sendTone);
+    
+                $('#mute').click(function () {
+                    if (_gConversation)
+                        SCL2.setIsMuted(app, _gConversation, true).done();
+                })
+                $('#unmute').click(function () {
+                    if (_gConversation)
+                        SCL2.setIsMuted(app, _gConversation, false).done();
+                })
+                $('#hold').click(function () {
+                    if (_gConversation)
+                        SCL2.setIsOnHold(app, _gConversation, true).done();
+                })
+                $('#unhold').click(function () {
+                    if (_gConversation)
+                        SCL2.setIsOnHold(app, _gConversation, false).done();
+                })
+    
+                // ---- video ----
+                $('#startVideoService').click(function () {
+                    if (_gConversation)
+                        return SCL2.startVideoService(app, _gConversation).done();
+                });
+    
+                $('#stopVideoService').click(function () {
+                    if (_gConversation)
+                        return SCL2.stopVideoService(app, _gConversation).done();
+                });
+    
+                $('#acceptVideoService').click(function () {
+                    if (_gConversation)
+                        return SCL2.acceptVideoService(app, _gConversation).done();
+                });
+    
+                $('#rejectVideoService').click(function () {
+                    if (_gConversation)
+                        return SCL2.rejectVideoService(app, _gConversation).done();
+                });
+    
+                $('#autoAcceptVideoService').click(function () {
+                    SCL2.waitForVideoNotifiedThenAccept(app).then(function (conversation) {
+                        _gConversation = conversation;
+                    }).done();
+                });
+    
+                $('#showP0Video').click(function () {
+                    SCL2.showParticipantVideo(app, _gConversation, _gConversation.participants(0), document.getElementById('renderWindow0')).done();
+                })
+    
+                $('#hideP0Video').click(function () {
+                    SCL2.hideParticipantVideo(app, _gConversation, _gConversation.participants(0)).done();
+                })
+    
+                $('#showP1Video').click(function () {
+                    SCL2.showParticipantVideo(app, _gConversation, _gConversation.participants(1), document.getElementById('renderWindow1')).done();
+                })
+    
+                $('#hideP1Video').click(function () {
+                    SCL2.hideParticipantVideo(app, _gConversation, _gConversation.participants(1)).done();
+                })
+    
+                $('#showP2Video').click(function () {
+                    SCL2.showParticipantVideo(app, _gConversation, _gConversation.participants(2), document.getElementById('renderWindow2')).done();
+                })
+    
+                $('#hideP2Video').click(function () {
+                    SCL2.hideParticipantVideo(app, _gConversation, _gConversation.participants(2)).done();
+                })
+    
+                $('#showP3Video').click(function () {
+                    SCL2.showParticipantVideo(app, _gConversation, _gConversation.participants(3), document.getElementById('renderWindow3')).done();
+                })
+    
+                $('#hideP3Video').click(function () {
+                    SCL2.hideParticipantVideo(app, _gConversation, _gConversation.participants(3)).done();
+                })
+    
+                $('#showMyVideo').click(function () {
+                    return SCL2.showMyVideo(app, _gConversation, document.getElementById('previewWindow')).done();
+                });
+    
+                $('#hideMyVideo').click(function () {
+                    return SCL2.hideMyVideo(app, _gConversation).done();
+                });
+    
+                $('#subscribe').click(function () {
+                    var sipUri = $('#personUri').text();
+                    searchForOnePerson(sipUri).then(function (person) {
+                        person.status.changed(function (s) {
+                            console.log('>>>>>>>>>> status changed to: ' + s);
+                        })
+                        person.activity.changed(function (a) {
+                            console.log('>>>>>>>>>> activity changed to: ' + a);
+                        })
+                        subscription1 = person.status.subscribe();
+                        subscription2 = person.activity.subscribe();
+                    })
+                })
+    
+                $('#unsubscribe').click(function () {
+                    if (subscription1) subscription1.dispose();
+                    if (subscription2) subscription2.dispose();
+                })
+    
+                function signInImpl(snapshot) {
+                    var authType = $('input[name=auth]:checked').val(); // basic || implicit || cafe1 || cafe2 || cafe3
+                    
+                    var origins = [
+//                        'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+                          'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+//                        'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root',
+//                        'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root',
+//                        'https://lyncdiscover.microsoft.com/autodiscover/autodiscoverservice.svc/root',
+//                        'https://lyncdiscoverinternal.microsoft.com/autodiscover/autodiscoverservice.svc/root',
+//                        'https://meetings.metio.net/Autodiscover/AutodiscoverService.svc/root'
+                    ];
+                    
+                    var options;
+                    
+                    //access_token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSIsImtpZCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSJ9.eyJhdWQiOiJodHRwczovL3dlYmRpcjBtLm9ubGluZS5seW5jLmNvbSIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzcyZjk4OGJmLTg2ZjEtNDFhZi05MWFiLTJkN2NkMDExZGI0Ny8iLCJpYXQiOjE0MzA1MTA5MTYsIm5iZiI6MTQzMDUxMDkxNiwiZXhwIjoxNDMwNTE0ODE2LCJ2ZXIiOiIxLjAiLCJ0aWQiOiI3MmY5ODhiZi04NmYxLTQxYWYtOTFhYi0yZDdjZDAxMWRiNDciLCJvaWQiOiI3MGY0OTA5NC05MmE5LTQ2NzMtYmRlOC1jMmRjYTk0Yjg4ODAiLCJ1cG4iOiJ3ZXdhQG1pY3Jvc29mdC5jb20iLCJwdWlkIjoiMTAwMzNGRkY4MDA2QzdDRCIsInN1YiI6IkZDQTZYTFR6VnhFX3VPUjk1UUh2d0pEMkpwM3c1OHVxM1pjUkhNWnNfZTQiLCJnaXZlbl9uYW1lIjoiV2VpIiwiZmFtaWx5X25hbWUiOiJXYW5nIChPQ0RHKSIsIm5hbWUiOiJXZWkgV2FuZyAoT0NERykiLCJhbXIiOlsicHdkIl0sInVuaXF1ZV9uYW1lIjoid2V3YUBtaWNyb3NvZnQuY29tIiwiYXBwaWQiOiJkMzU5MGVkNi01MmIzLTQxMDItYWVmZi1hYWQyMjkyYWIwMWMiLCJhcHBpZGFjciI6IjAiLCJzY3AiOiJ1c2VyX2ltcGVyc29uYXRpb24iLCJhY3IiOiIxIn0.QNNgh59Pia_ZU5SGYJKYYn0WvoA1nry6jKBG1dXV7tqdHjZ7uey3F_Lxbn3HMYy-QDNP6Z6DskOEbvxxgZl-FGM-AJxmEKFAJkKBrTlgs_beexWOscm0qpdSw9JpKdmIcb8wnEcvdRtptDxGm4ya8qqAYQ4dwzH9gbMTVEgEkfGBpRE-eACmBoOK-TnEuBFSD9HMT9QixE3jGsRUTxRbXCgFlIDI7DIwEgbxKXbxG3ZeiFs6kzXc-5jeQPrt1koXDwLA-PXoae_2RAu1knrFFv05Af6IjsQBKO9Z3BEmqky955VyxwPaTayMEXZkH8ifn7hENEv1xnvbpbLWggfAIg';
+                    
+                    function auth(req, send) {
+                        if (req.url.match(/https:\/\/webdir0d/)) {
+                            req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                        } else if (req.url.match(/https:\/\/webpoolbn10m03/)) {
+                            req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                        } else {
+                            req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                        }
+                        return send(req);
+                    }
+                    
+                    switch (authType) {
+                        case 'basic':
+                            options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                username: $('#username').text(),
+                                password: $('#password').text(),
+                            };
+                        break;
+                        case 'implicit':
+                            options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                client_id: 'e58ead40-7ceb-4f20-b85e-d48d70db558f', //'e48d4214-364e-4731-b2b6-47dabf529218',
+                                //oauth_uri: 'https://login.windows-ppe.net/common/oauth2/authorize?domain_hint=ssi.ccsctp.net',
+//                                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=ssi.ccsctp.net',
+                                origins: origins,
+                            }
+                        break;
+                        case 'cafe1':
+                            access_token = access_token1
+                            options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                auth: auth,
+                                domain: 'devex.ccsctp.net'
+                            }
+                        break;
+                        case 'cafe2':
+                            access_token = access_token2
+                            options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                auth: auth,
+                                domain: 'devex.ccsctp.net'
+                            }
+                        break;
+                        case 'cafe3':
+                            access_token = access_token3
+                            options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                auth: auth,
+                                domain: 'devex.ccsctp.net'
+                            }
+                        break;
+                    }
+                    
+                    // var usePassive = $('#usepassiveauth')[0].checked;
+                    // var options = usePassive ? {
+                    //     auth_: Skype.Web.Auth.Passive(),
+                    //     auth__: function (req, send) {
+                    //         if (req.url.match(/https:\/\/webdir0d/)) {
+                    //             req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                    //         } else if (req.url.match(/https:\/\/webpoolbn10m03/)) {
+                    //             req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                    //         } else {
+                    //             req.headers['Authorization'] = 'Bearer ' + access_token.trim();
+                    //         }
+                    //         return send(req);
+                    //     },
+                    //     id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                    //     client_id: 'e48d4214-364e-4731-b2b6-47dabf529218',
+                    //     oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=microsoft.com',
+                    //     origins: origins,
+                    //     //username: 'cafe1@devex.ccsctp.net',
+                    //     //domain: 'devex.ccsctp.net'
+                    // } : {
+                    //     username: $('#username').text(),
+                    //     password: $('#password').text(),
+                    // };
+    
+                    // if ($('#tabId').text())
+                    //     options.id = $('#tabId').text();
+    
+                    // if (localStorage['instanceid'])
+                    //     options.instanceId = localStorage['instanceid'];
+    
+                    // options.supportsHtml = false;
+    
+                    // if (snapshot)
+                    //     options.snapshot = snapshot;
+    
+                    SCL2.signIn(app, options).done();
+                }
+
+                $('#signIn').click(function () {
+                    signInImpl();
+                });
+    
+                $('#signInAnony').click(function () {
+                    var meetingUri = $('#meetingUri').text();
+    
+                    SCL2.signInAnonymous(app, { meeting: meetingUri, name: 'guest' }).done();
+                });
+    
+                $('#signInWithSnapshotNOPII').click(function () {
+                    signInImpl();
+                });
+    
+                $('#signInWithSnapshot').click(function () {
+                    var snapshot = JSON.parse(sessionStorage.getItem('Skype.Web.Snapshot.NOPII.' + $('#tabId').text()));
+                    signInImpl(snapshot);
+                });
+                // take a snapshot and save to localStorage
+                $('#snapshot-reload').click(function () {
+                    var snapshot = JSON.stringify(app.application().getSnapshot());
+                    window.localStorage.setItem('snapshot', snapshot);
+    
+                    location.reload()
+                });
+    
+                $('#signOut').click(function () {
+                    SCL2.signOut(app).then(function () {
+                        initLocalApp();
+                        init();
+                    }).done();
+                });
+            })
+        </script>
+        <script>
+            var iframe = document.createElement('iframe');
+            iframe.style.display = 'none';
+            iframe.title = new Date().toString();
+            iframe.src = 'http://wewa11:8080/index.html';
+            iframe.id = 'sdfsdfsdf';
+            iframe.onload = function () {
+                // obtain the web tickets
+                iframe.contentWindow.postMessage(JSON.stringify({
+                    username: 'cafe11@devex.ccsctp.net',
+                    password: '07Apples',
+                    domainName: 'devex.ccsctp.net',
+                    clientID: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+                    resourceAppIdUrl: 'https://webdir0d.tip.lync.com',
+                    authorityUrl: 'https://login.windows-ppe.net/common/oauth2/authorize/',
+                    reqId: 'cafe1'
+                }), '*');
+                iframe.contentWindow.postMessage(JSON.stringify({
+                    username: 'cafe12@devex.ccsctp.net',
+                    password: '07Apples',
+                    domainName: 'devex.ccsctp.net',
+                    clientID: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+                    resourceAppIdUrl: 'https://webdir0d.tip.lync.com',
+                    authorityUrl: 'https://login.windows-ppe.net/common/oauth2/authorize/',
+                    reqId: 'cafe2'
+                }), '*');
+                iframe.contentWindow.postMessage(JSON.stringify({
+                    username: 'cafe13@devex.ccsctp.net',
+                    password: '07Apples',
+                    domainName: 'devex.ccsctp.net',
+                    clientID: 'd3590ed6-52b3-4102-aeff-aad2292ab01c',
+                    resourceAppIdUrl: 'https://webdir0d.tip.lync.com',
+                    authorityUrl: 'https://login.windows-ppe.net/common/oauth2/authorize/',
+                    reqId: 'cafe3'
+                }), '*');
+            }
+    
+            document.body.appendChild(iframe);
+    
+            // window.addEventListener('message', function (msg) { if (msg.origin == 'http://wewa11:8080') { console.log(msg); } });
+            var access_token1 = '';
+            var access_token2 = '';
+            var access_token3 = '';
+            window.addEventListener('message', function (msg) {
+                var data;
+                
+                if (msg.origin == 'http://wewa11:8080') {
+                    data = JSON.parse(msg.data);
+                    switch(data.reqId) {
+                        case 'cafe1':
+                            access_token1 = data.ticket;
+                            $('input[name=auth][value=cafe1]').removeAttr('disabled');
+                            $('#authCafe1').removeClass('disabled').addClass('enabled');
+                            break;
+                        case 'cafe2':
+                            access_token2 = data.ticket;
+                            $('input[name=auth][value=cafe2]').removeAttr('disabled');
+                            $('#authCafe2').removeClass('disabled').addClass('enabled');
+                            break;
+                        case 'cafe3':
+                            access_token3 = data.ticket;
+                            $('input[name=auth][value=cafe3]').removeAttr('disabled');
+                            $('#authCafe3').removeClass('disabled').addClass('enabled');
+                            break;
+                    }
+                }
+            });
+        </script>
+        <script>
+            function printSS() {
+                    return Object.keys(sessionStorage)
+                        .filter(function (key) { return /Skype\.Web\.Snapshot\./.test(key); })
+                        .map(function (key) {
+                            return JSON.parse(sessionStorage[key]);
+                        })
+            }
+            
+            function getTopic() {
+                debugger;
+                _gConversation.topic();
+            }
+        </script>
     </body>
+
 </html>
