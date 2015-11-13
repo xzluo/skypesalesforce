@@ -51,10 +51,10 @@ function TelemetryManager() {
 
 
 function initLocalAppInternal() {
-    // app = new JCafe(new Application());
+    app = new JCafe(new Application());
     app = new JCafe(new Application({telemetryManager: new TelemetryManager()}));
     app.on('event', function (data) {
-        console.log('[app] ', data);
+       // console.log('[app] ', data);
     })
 
     app.init();
