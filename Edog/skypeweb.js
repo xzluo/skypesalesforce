@@ -7275,7 +7275,8 @@ var Skype;
                         // 500 X-MS-diagnostics: 28033;reason="The web ticket has expired."
                         // 500 X-MS-Diagnostics: 28072;reason="The ticket presented could not be verified, a new ticket is required."
                         // 403 X-MS-diagnostics: 28077;reason="Invalid Audience in the web ticket"
-                        return code == 28032 || code == 28033 || code == 28072 || code == 28077;
+                        // 403 X-Ms-diagnostics: 28055;reason="The OAuth token is invalid.";faultcode="wsse:FailedAuthentication"
+                        return code == 28032 || code == 28033 || code == 28072 || code == 28077 || code == 28055;
                     }
                     return false;
                 }
@@ -10687,7 +10688,7 @@ var Skype;
                         origins = Stack.AutoD[origins](domain);
                         domain = null;
                     }
-                    if (ssEnabled && !snapshot && storage)
+                    if (ssEnabled && !snapshot && storage && storage.getItem)
                         snapshot = JSON.parse(storage.getItem(ssPrefix + '.' + id) || 'null');
                     var routes = map((snapshot || !origins) ? [null] : origins, function (origin) {
                         return Task.wait().then(function () {
@@ -10923,7 +10924,11 @@ var Skype;
                                                 'xframe',
                                                 'root'
                                             ].indexOf(rel) >= 0; });
-                                            storage.setItem(ssPrefix + '.' + id, JSON.stringify(ss));
+                                            try {
+                                                storage.setItem(ssPrefix + '.' + id, JSON.stringify(ss));
+                                            }
+                                            catch (err) {
+                                            }
                                         }, Infinity);
                                         repository.updated(save);
                                     }
@@ -12510,7 +12515,7 @@ var Skype;
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
 /// <reference path="utils.ts" />
-/// <reference path="media/PluginManager.ts" />
+/// <reference path="media/plugin/PluginManager.ts" />
 var Skype;
 (function (Skype) {
     var Web;
@@ -14784,1508 +14789,1502 @@ var Skype;
                  * linking this client to the conference is created. Once escalation succeeds, the second
                  * session replaces the original P2P session.
                  *
-                 * @param {UCWA} ucwa
-                 * @param {MediaPlugin} mediaPlugin
-                 * @param {Devices} [devices] - Audio and video devices.
-                 * @param {String} localUri -  SIP URI of the signed-in user.
-                 * @param {String} [threadId] - Required for outgoing calls.
-                 * @param {Collection} participants - Conversation participants.
-                 * @param {Participant} selfParticipant
-                 * @param {AudioVideoInvitation} [invitation] - Required for incoming calls.
-                 * @param {Resource} [rAVInvitation] - Invitation resource. Required for incoming calls.
-                 * @param {Resource} [rConversation] - The parent rel=conversation resource.
-                 * @param {String} [escalateAudioVideoUri] - Escalation URI. Required for the AV conference
-                 *                                           session created to replace the AV P2P session.
-                 * @param {Object} [context] - An invitation context can accompany the generated audiovideo invitation.
-                 *
-                 * @property {Modality.State} state
-                 * @property {Boolean} muted - get/set whether the audio is muted
-                 * @property {Boolean} onHold - get/set whether the audio/video is on hold
-                 *
-                 * @method {Promise} start - Starts an outgoing call.
-                 * @method {Promise} accept - Accepts an incoming call.
-                 * @method {Promise} stop - Stops an ongoing call.
-                 *
-                 * @event changed - Occurs after the object adds or removes own methods.
-                 * @event escalated - Occurs when this AV conference session replaces the initial p2p AV session
-                 *
                  * @created Apr 2014 - refactored out of old AudioVideoModality; added MPOP and escalation support.
                  * @blame sosobov
                  */
-                function AudioVideoSession(options) {
-                    var changed = new Event(), escalated = new Event(), self = {}, pcAV, mediaConfig, mediaPlugin = options.mediaPlugin, devices = options.devices, ucwa = options.ucwa, invitationContext = options.context, participants = options.participants, selfParticipant = options.selfParticipant, conversation = options.conversation, rConversation = options.rConversation, rAVInvitation = options.rAVInvitation, rAVRenegotiation, 
-                    // During an outgoing call the server may set up more than one audioVideoSession, because
-                    // the remote sip uri that we are calling may be signed in on more than one endpoint.
-                    // Therefore we may see multiple pairs of audioVideoNegotiation - audioVideoSession events.
-                    // Eventually, one of these sessions will be connected, others will be deleted. We keep
-                    // track of these sessions in a dictionary of objects indexed by audioVideoSession hrefs,
-                    // where these session objects may have properties:
-                    //    resource:  audioVideoSession resource;
-                    //    negotiated:  boolean (true if this session was successfully negotiated);
-                    //    resumeAudioVideoUri:  present if this is an escalated conference session.
-                    avSessions = {}, invitation = options.invitation, rInvitation = options.rInvitation, threadId = options.threadId, operationId = options.operationId || guid(), // provided by unittest or generated on the fly
-                    sessionContext = options.sessionContext || guid(), // provided by unittest or generated on the fly
-                    outAvRenegoOpIds = {}, // list of outgoing audioVideoRenegotiation operationId values
-                    localUri = options.localUri, remoteUri, state = Property({
-                        value: invitation || (rInvitation && rInvitation.rel == 'onlineMeetingInvitation') ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    }), 
-                    // TODO: if we receive a video invitation we force the client to accept/decline on the video
-                    // service. Figure out how to deal with answering with audio to a video invitation.
-                    audioState = Property({
-                        value: isAudioInvitation() ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    }), videoState = Property({
-                        value: isVideoInvitation() ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    }), activeSourceId, recentActiveSpeakers = {}, activeModalities = { audio: false, video: false }, audioChannel, mainVideoStream = new Internal.MediaStream({
-                        mediaPlugin: mediaPlugin,
-                        type: Internal.MediaEnum.StreamType.MainRender
-                    }), selfVideoStream = new Internal.MediaStream({
-                        mediaPlugin: mediaPlugin,
-                        type: Internal.MediaEnum.StreamType.Preview
-                    }), 
-                    // remote video streams
-                    videoStreams = Collection(), dfdStart, // promise returned by the start method
-                    dfdAccept, // promise returned by the accept method
-                    // video config of the main media manager channel requested by either start or accept;
-                    // is needed for setting the initial value of video channel's isStarted property for the
-                    // self participant when start/accept is finished.
-                    mainVideoConfig = 0 /* NOT_PRESENT */, 
-                    // a unique id of this session - handy for debugging this session's
-                    // server event subscription
-                    modelId = random(), RemoteHoldState = {
-                        Unknown: 0,
-                        HoldOffered: 1,
-                        HoldAnswered: 2,
-                        HoldCompleted: 3,
-                        ResumeOffered: 4,
-                        ResumeAnswered: 5,
-                        ResumeCompleted: 6
-                    }, AudioVideoDirection = StringEnum('Inactive', // hold
-                    'ReceiveOnly', 'SendOnly', 'SendReceive', // resume
-                    'Unknown'), 
-                    // A flag to track the renegotiation progress when a remote
-                    // participant hold/resume the call in P2P mode.
-                    //
-                    // Steps to identify when remote participant hold/resume in P2P:
-                    // 1. wait for audioVideo renegotiation offer.
-                    // 2. if the offer has "a=inactive" field (for m=audio or m=video),
-                    //    it is a HOLD request, mark it and expect ANSWER READY.
-                    //    Otherwise, it MIGHT be a RESUME request (but not necessarily),
-                    //    so mark it that way.
-                    // 3. if answer has "a=inactive" field, it is a HOLD request, mark it
-                    //    and expect "audioVideoRenegotiation completed".
-                    //    Otherwise, it MIGHT be a RESUME request (but not necessarily),
-                    //    so mark it that way.
-                    // 4. when "audioVideoRenegotiation completed" event is received
-                    //    with "Incoming" direction, progress the marker set in previous
-                    //    steps; and expect CHANNEL_DIRECTION_CHANGED event.
-                    // 5. if CHANNEL_DIRECTION_CHANGED event is received with direction
-                    //    equal to NO_ACTIVE_MEDIA, and the HOLD marker was set in last
-                    //    step, it completes a HOLD renegotiation, so we can set:
-                    //    p.audioOnHold(true) for the remote participant.
-                    // 6. if CHANNEL_DIRECTION_CHANGED event is received with direction
-                    //    equal to other values (likely BOTH), and the RESUME marker was
-                    //    set in last step, it completes a RESUME renegotiation, so set:
-                    //    p.audioOnHold(false) for the remote participant.
-                    remoteHoldState = RemoteHoldState.Unknown, escalateAudioVideoUri = options.escalateAudioVideoUri, fEscalation = isNotEmptyString(escalateAudioVideoUri);
-                    //#region mute
-                    // mutes/unmutes the audio channel or returns the mute status
-                    var muted = Property({
-                        value: false,
-                        get: function () {
-                            // if this throws, the cached value won't be changed
-                            check.state(pcAV.state(), PluginComponent.State.Loaded);
-                            if (isConferencing())
-                                return muted();
-                            var res = pcAV.invoke('GetMuteStatus', Internal.MediaEnum.MediaDeviceType.MIC, false); // isDeviceSystemProperty
-                            // the output param is a flag telling us if our audio is muted or not
-                            return res[1];
-                        },
-                        set: function (val) {
-                            // if this throws, the cached value won't be changed
-                            check.state(pcAV.state(), PluginComponent.State.Loaded);
-                            // soft mute is applicable in conference mode
-                            if (isConferencing()) {
-                                var rel = val ? 'muteAudio' : 'unmuteAudio', rAudio = selfParticipant[Internal.sInternal].rAudio;
-                                return Task.wait().then(function () {
-                                    if (!rAudio.hasLink(rel))
-                                        return ucwa.send('GET', rAudio.href);
-                                }).then(function () {
-                                    return rAudio.link(rel).href;
-                                }).then(function (href) {
-                                    return ucwa.send('POST', href);
-                                }).then(function () {
-                                    return val;
+                var AudioVideoSession = (function () {
+                    //#endregion
+                    function AudioVideoSession(options) {
+                        var changed = new Event(), escalated = new Event(), self = {}, pcAV, mediaConfig, mediaPlugin = options.mediaPlugin, devices = options.devices, ucwa = options.ucwa, invitationContext = options.context, participants = options.participants, selfParticipant = options.selfParticipant, conversation = options.conversation, rConversation = options.rConversation, rAVInvitation = options.rAVInvitation, rAVRenegotiation, 
+                        // During an outgoing call the server may set up more than one audioVideoSession, because
+                        // the remote sip uri that we are calling may be signed in on more than one endpoint.
+                        // Therefore we may see multiple pairs of audioVideoNegotiation - audioVideoSession events.
+                        // Eventually, one of these sessions will be connected, others will be deleted. We keep
+                        // track of these sessions in a dictionary of objects indexed by audioVideoSession hrefs,
+                        // where these session objects may have properties:
+                        //    resource:  audioVideoSession resource;
+                        //    negotiated:  boolean (true if this session was successfully negotiated);
+                        //    resumeAudioVideoUri:  present if this is an escalated conference session.
+                        avSessions = {}, invitation = options.invitation, rInvitation = options.rInvitation, threadId = options.threadId, operationId = options.operationId || guid(), // provided by unittest or generated on the fly
+                        sessionContext = options.sessionContext || guid(), // provided by unittest or generated on the fly
+                        outAvRenegoOpIds = {}, // list of outgoing audioVideoRenegotiation operationId values
+                        localUri = options.localUri, remoteUri, state = Property({
+                            value: invitation || (rInvitation && rInvitation.rel == 'onlineMeetingInvitation') ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
+                        }), 
+                        // TODO: if we receive a video invitation we force the client to accept/decline on the video
+                        // service. Figure out how to deal with answering with audio to a video invitation.
+                        audioState = Property({
+                            value: isAudioInvitation() ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
+                        }), videoState = Property({
+                            value: isVideoInvitation() ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
+                        }), activeSourceId, recentActiveSpeakers = {}, activeModalities = { audio: false, video: false }, audioChannel, mainVideoStream = new Internal.MediaStream({
+                            mediaPlugin: mediaPlugin,
+                            type: Internal.MediaEnum.StreamType.MainRender
+                        }), selfVideoStream = new Internal.MediaStream({
+                            mediaPlugin: mediaPlugin,
+                            type: Internal.MediaEnum.StreamType.Preview
+                        }), 
+                        // remote video streams
+                        videoStreams = Collection(), dfdStart, // promise returned by the start method
+                        dfdAccept, // promise returned by the accept method
+                        // video config of the main media manager channel requested by either start or accept;
+                        // is needed for setting the initial value of video channel's isStarted property for the
+                        // self participant when start/accept is finished.
+                        mainVideoConfig = 0 /* NOT_PRESENT */, 
+                        // a unique id of this session - handy for debugging this session's
+                        // server event subscription
+                        modelId = random(), RemoteHoldState = {
+                            Unknown: 0,
+                            HoldOffered: 1,
+                            HoldAnswered: 2,
+                            HoldCompleted: 3,
+                            ResumeOffered: 4,
+                            ResumeAnswered: 5,
+                            ResumeCompleted: 6
+                        }, AudioVideoDirection = StringEnum('Inactive', // hold
+                        'ReceiveOnly', 'SendOnly', 'SendReceive', // resume
+                        'Unknown'), 
+                        // A flag to track the renegotiation progress when a remote
+                        // participant hold/resume the call in P2P mode.
+                        //
+                        // Steps to identify when remote participant hold/resume in P2P:
+                        // 1. wait for audioVideo renegotiation offer.
+                        // 2. if the offer has "a=inactive" field (for m=audio or m=video),
+                        //    it is a HOLD request, mark it and expect ANSWER READY.
+                        //    Otherwise, it MIGHT be a RESUME request (but not necessarily),
+                        //    so mark it that way.
+                        // 3. if answer has "a=inactive" field, it is a HOLD request, mark it
+                        //    and expect "audioVideoRenegotiation completed".
+                        //    Otherwise, it MIGHT be a RESUME request (but not necessarily),
+                        //    so mark it that way.
+                        // 4. when "audioVideoRenegotiation completed" event is received
+                        //    with "Incoming" direction, progress the marker set in previous
+                        //    steps; and expect CHANNEL_DIRECTION_CHANGED event.
+                        // 5. if CHANNEL_DIRECTION_CHANGED event is received with direction
+                        //    equal to NO_ACTIVE_MEDIA, and the HOLD marker was set in last
+                        //    step, it completes a HOLD renegotiation, so we can set:
+                        //    p.audioOnHold(true) for the remote participant.
+                        // 6. if CHANNEL_DIRECTION_CHANGED event is received with direction
+                        //    equal to other values (likely BOTH), and the RESUME marker was
+                        //    set in last step, it completes a RESUME renegotiation, so set:
+                        //    p.audioOnHold(false) for the remote participant.
+                        remoteHoldState = RemoteHoldState.Unknown, escalateAudioVideoUri = options.escalateAudioVideoUri, fEscalation = isNotEmptyString(escalateAudioVideoUri);
+                        //#region mute
+                        // mutes/unmutes the audio channel or returns the mute status
+                        var muted = Property({
+                            value: false,
+                            get: function () {
+                                // if this throws, the cached value won't be changed
+                                check.state(pcAV.state(), PluginComponent.State.Loaded);
+                                if (isConferencing())
+                                    return muted();
+                                var res = pcAV.invoke('GetMuteStatus', Internal.MediaEnum.MediaDeviceType.MIC, false); // isDeviceSystemProperty
+                                // the output param is a flag telling us if our audio is muted or not
+                                return res[1];
+                            },
+                            set: function (val) {
+                                // if this throws, the cached value won't be changed
+                                check.state(pcAV.state(), PluginComponent.State.Loaded);
+                                // soft mute is applicable in conference mode
+                                if (isConferencing()) {
+                                    var rel = val ? 'muteAudio' : 'unmuteAudio', rAudio = selfParticipant[Internal.sInternal].rAudio;
+                                    return Task.wait().then(function () {
+                                        if (!rAudio.hasLink(rel))
+                                            return ucwa.send('GET', rAudio.href);
+                                    }).then(function () {
+                                        return rAudio.link(rel).href;
+                                    }).then(function (href) {
+                                        return ucwa.send('POST', href);
+                                    }).then(function () {
+                                        return val;
+                                    });
+                                }
+                                // hard mute is applicable to P2P mode
+                                pcAV.invoke('MuteOrUnMute', Internal.MediaEnum.MediaDeviceType.MIC, val, // mute
+                                false); // isDeviceSystemProperty
+                                return val;
+                            }
+                        });
+                        //#endregion mute
+                        //#region onHold
+                        // holds/resumes audio/video or returns the onHold status
+                        var onHold = Property({
+                            value: false,
+                            get: function () {
+                                check.state(pcAV.state(), PluginComponent.State.Loaded);
+                                return onHold();
+                            },
+                            set: function (val) {
+                                // if this throws, the cached value won't be changed
+                                check.state(pcAV.state(), PluginComponent.State.Loaded);
+                                if (!isConferencing() && participants.size() > 0) {
+                                    // the call is on hold when the remote puts on hold; so when
+                                    // the local participant requests hold, the plugin will not
+                                    // renegotiate, and no need to wait for renegotiation result
+                                    if (participants(0).audio.isOnHold() && !onHold())
+                                        return val;
+                                }
+                                var audioConfig = val ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
+                                var moreChannels = activeModalities.video && isConferencing();
+                                mainVideoConfig = activeModalities.video ?
+                                    (val ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */) :
+                                    0 /* NOT_PRESENT */;
+                                pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
+                                mainVideoConfig, // main video configuration
+                                moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
+                                moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
+                                0 /* NOT_PRESENT */); // panoVideoConfig
+                                return ucwa.wait({
+                                    type: 'completed',
+                                    target: { rel: 'audioVideoRenegotiation' },
+                                    resource: function (r) {
+                                        return r.get('direction') == 'Outgoing' && r.link('audioVideoSession').href in avSessions;
+                                    }
+                                }).then(function (event) {
+                                    if (event.status == 'Success')
+                                        return val;
+                                    throw Exception('RenegotiationFailed', { reason: event.reason });
                                 });
                             }
-                            // hard mute is applicable to P2P mode
-                            pcAV.invoke('MuteOrUnMute', Internal.MediaEnum.MediaDeviceType.MIC, val, // mute
-                            false); // isDeviceSystemProperty
-                            return val;
-                        }
-                    });
-                    //#endregion mute
-                    //#region onHold
-                    // holds/resumes audio/video or returns the onHold status
-                    var onHold = Property({
-                        value: false,
-                        get: function () {
-                            check.state(pcAV.state(), PluginComponent.State.Loaded);
-                            return onHold();
-                        },
-                        set: function (val) {
-                            // if this throws, the cached value won't be changed
-                            check.state(pcAV.state(), PluginComponent.State.Loaded);
-                            if (!isConferencing() && participants.size() > 0) {
-                                // the call is on hold when the remote puts on hold; so when
-                                // the local participant requests hold, the plugin will not
-                                // renegotiate, and no need to wait for renegotiation result
-                                if (participants(0).audio.isOnHold() && !onHold())
-                                    return val;
-                            }
-                            var audioConfig = val ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
-                            var moreChannels = activeModalities.video && isConferencing();
-                            mainVideoConfig = activeModalities.video ?
-                                (val ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */) :
-                                0 /* NOT_PRESENT */;
-                            pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
-                            mainVideoConfig, // main video configuration
-                            moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
-                            moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
-                            0 /* NOT_PRESENT */); // panoVideoConfig
-                            return ucwa.wait({
-                                type: 'completed',
-                                target: { rel: 'audioVideoRenegotiation' },
-                                resource: function (r) {
-                                    return r.get('direction') == 'Outgoing' && r.link('audioVideoSession').href in avSessions;
-                                }
-                            }).then(function (event) {
-                                if (event.status == 'Success')
-                                    return val;
-                                throw Exception('RenegotiationFailed', { reason: event.reason });
-                            });
-                        }
-                    });
-                    //#endregion onHold
-                    options = null;
-                    ucwa.event(onServerEvent);
-                    state.changed(function (newState, reason, oldState) {
-                        log('AudioVideoSession(' + modelId + ')::state: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
-                    });
-                    audioState.changed(function (newState, reason, oldState) {
-                        log('AudioVideoSession(' + modelId + ')::audioState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
-                    });
-                    videoState.changed(function (newState, reason, oldState) {
-                        log('AudioVideoSession(' + modelId + ')::videoState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
-                    });
-                    state.when(Internal.Modality.State.Disconnected, function () {
-                        audioState(Internal.Modality.State.Disconnected);
-                        videoState(Internal.Modality.State.Disconnected);
-                    });
-                    // note that both reset* methods will be called with the "reason" parameter if the
-                    // reason was set when property values were changed.
-                    videoState.when(Internal.Modality.State.Disconnected, resetVideo);
-                    audioState.when(Internal.Modality.State.Disconnected, resetAudio);
-                    participants.removed(function (p) {
-                        var id = p[Internal.sInternal].audioSourceId();
-                        delete recentActiveSpeakers[id];
-                        if (activeSourceId == id)
-                            activeSourceId = -1;
-                    });
-                    setVideoRendering(selfVideoStream, true);
-                    if (!isConferencing())
-                        setVideoRendering(mainVideoStream, false);
-                    //#region self
-                    extend(self, {
-                        state: state.asReadOnly(),
-                        audioState: audioState.asReadOnly(),
-                        videoState: videoState.asReadOnly(),
-                        start: async(start),
-                        stop: async(stop),
-                        sendDtmf: sendDtmf,
-                        changed: changed.observer,
-                        escalated: escalated.observer,
-                        muted: muted,
-                        onHold: onHold,
-                        selfVideoStream: selfVideoStream,
-                        showParticipantVideo: showParticipantVideo,
-                        removeParticipantVideo: removeParticipantVideo,
-                        removeVideo: async(removeAllVideo)
-                    });
-                    if (invitation) {
-                        // incoming call
-                        extend(self, {
-                            from: invitation.from,
-                            accept: async(accept)
                         });
-                    }
-                    //#endregion
-                    //#region private utilities
-                    function initMedia() {
-                        return mediaConfig ?
-                            Task.wait(mediaConfig) :
-                            mediaPlugin.getMediaConfig() // otherwise load it and return when it becomes available
-                                .then(function (mc) {
-                                mediaConfig = mc;
-                                return mediaConfig;
-                            });
-                    }
-                    function isConferencing() {
-                        var convState = rConversation && rConversation.get('state', '');
-                        // TODO: move Conversation.State to model.common.js and use enum here
-                        return convState == 'Conferencing' || convState == 'Conferenced';
-                    }
-                    function getRenegotiationsHref() {
-                        var renegoHref, negoSession, negotiated = filter(values(avSessions), function (session) {
-                            return session.negotiated;
-                        });
-                        if (negotiated.length > 0) {
-                            assert(negotiated.length == 1);
-                            negoSession = negotiated[0];
-                            renegoHref = negoSession.resumeAudioVideoUri ||
-                                negoSession.resource.link('renegotiations').href;
-                            assert(renegoHref);
-                        }
-                        return renegoHref;
-                    }
-                    function setNegotiatedSession(sctx) {
-                        foreach(avSessions, function (session) {
-                            if (session.resource.get('sessionContext') == sctx)
-                                session.negotiated = true;
-                        });
-                    }
-                    // switches video rendering on/off for 1:1 conversations when video starts/stops streaming 
-                    // and when video container is set/changed/nulled
-                    function setVideoRendering(videoStream, isPreview) {
-                        videoStream._isFlowing.changed(function (val) {
-                            if (val)
-                                showVideo(videoStream, isPreview);
-                            else
-                                removeVideo(videoStream, isPreview);
-                        });
-                        videoStream.source.sink.container.changed(function (newVal, reason, oldVal) {
-                            if (videoStream._isFlowing()) {
-                                if (oldVal)
-                                    removeVideo(videoStream, isPreview);
-                                if (newVal)
-                                    showVideo(videoStream, isPreview);
-                            }
-                        });
-                    }
-                    // called when we stop 1:1 video (including escalation to a meeting)
-                    function removeAllVideo() {
-                        removeVideo(mainVideoStream, false);
-                        removeVideo(selfVideoStream, true);
-                        mainVideoStream._isFlowing(false);
-                        selfVideoStream._isFlowing(false);
-                        selfParticipant[Internal.sInternal].setVideoStream(null);
-                        if (participants.size() > 0) {
-                            participants(0)[Internal.sInternal].setVideoStream(null);
-                            participants(0)[Internal.sInternal].setVideoStarted(void 0);
-                        }
-                    }
-                    function resetVideo(reason) {
-                        participants.each(function (p) {
-                            // reset the participant video stream source to an empty stream
-                            p[Internal.sInternal].setVideoStream(null);
-                            if (!isConferencing())
-                                p[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
-                        });
-                        mainVideoStream._isFlowing(false);
-                        selfVideoStream._isFlowing(false);
-                        videoStreams.empty();
-                        selfParticipant[Internal.sInternal].setVideoStream(null);
-                        if (reason !== Internal.sEscalation)
-                            selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
-                    }
-                    function resetAudio() {
-                        if (!isConferencing() && participants(0))
-                            participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Disconnected);
-                        // The audio state of self participant is replaced by AudioVideoModality::audioState 
-                        // in the conversation ctor, so resetting it as we do in resetVideo is useless:
-                        // if (reason !== sEscalation)
-                        //    selfParticipant[sInternal].audioState(Modality.State.Disconnected);
-                    }
-                    function enumcastStreamState(meState) {
-                        var ss = Internal.MediaEnum.StreamState, state;
-                        switch (meState) {
-                            case 1 /* STREAM_STARTED */:
-                                state = ss.Started;
-                                break;
-                            case 2 /* STREAM_ACTIVE */:
-                                state = ss.Active;
-                                break;
-                            case 3 /* STREAM_INACTIVE */:
-                                state = ss.Inactive;
-                                break;
-                            case 4 /* STREAM_STOPPED */:
-                                state = ss.Stopped;
-                                break;
-                        }
-                        return state;
-                    }
-                    // Check if the SDP offer/answer contains a=inactive field,
-                    // which indicates it is a renegotiation triggered when a
-                    // participant holds a call.
-                    function isHoldRequest(sdp) {
-                        return /\ba=inactive\b/gmi.test(sdp);
-                    }
-                    function isAudioInvitation() {
-                        return invitation && !invitation.hasVideo() ||
-                            rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
-                                conversation.meeting.availableModalities.audio() &&
-                                !conversation.meeting.availableModalities.video();
-                    }
-                    function isVideoInvitation() {
-                        return invitation && invitation.hasVideo() ||
-                            rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
-                                conversation.meeting.availableModalities.video();
-                    }
-                    //#endregion
-                    //#region public methods
-                    //#region start
-                    /**
-                     * Starts an outgoing Audio/Video call
-                     *
-                     *  @param {String} remoteUri
-                     *  @param {MediaEnum.MediaConfig} audioConfig
-                     *  @param {MediaEnum.MediaConfig} mainVideoConfig
-                     *  @param {Object} [video]
-                     *
-                     *  @returns {Promise}
-                     *
-                     *  Starting a P2P audio call
-                     *  - Creates an AVComponent in the media plugin.
-                     *  - Invokes AVComponent::SetCallConfig.
-                     *  - Invokes AVComponent::SetMediaConfig.
-                     *  - Gets an OFFER_READY event from the AVComponent.
-                     *  - Sends a POST request to startAudioVideo link with the SDP offer.
-                     *  - Gets an "audioVideoInvitation started" event from UCWA.
-                     *  - Gets an "audioVideoNegotiation started" event from UCWA with a provisional SDP answer.
-                     *  - Invokes AVComponent::SetProvisionalAnswer.
-                     *  -  Gets an "audioVideoSession added" event.
-                     *  -  Gets an "audioVideoNegotiation completed" event with a final SDP answer.
-                     *  -  Invokes AVComponent::SetFinalAnswer.
-                     *  -  Gets a "audioVideoInvitation completed" event from UCWA.
-                     *  -  Invokes AVComponent::CompleteNegotiation.
-                     *  -  Gets a "audioVideoRenegotiation started" event from UCWA.
-                     *  -  Gets a OFFER_READY event from AVComponent with a new SDP answer.
-                     *  -  Sends a POST request to audioVideoSession/renegotiations link.
-                     *  -  Gets a "audioVideoRenegotiation completed" event from UCWA with a new SDP answer.
-                     *  -  Invokes AVComponent::SetFinalAnswer.
-                     *  -  Invokes AVComponent::CompleteNegotiation.
-                     *
-                     *  Joining an audio conference call the client follows the same sequence with one exception:
-                     *  there is no initial negotiation - all "audioVideoNegotiation" events are absent.
-                     *
-                     *  If the client calls an invalid sip uri, it receives a single "audioVideoInvitation
-                     *  completed" event with failure status and appropriate error code.
-                     */
-                    function start(options) {
-                        // prohibit start of audio or video when that modality is already started
-                        if ((options.mainVideoConfig == 3 /* BOTH */ && activeModalities.video) ||
-                            (options.mainVideoConfig == 0 /* NOT_PRESENT */ &&
-                                options.audioConfig == 3 /* BOTH */ && activeModalities.audio))
-                            return 'already started';
-                        check.state(onHold(), false);
-                        var audioConfig = options.audioConfig, previewContainer = options.video && options.video.previewContainer, videoContainer = options.video && options.video.container, startsVideo = options.mainVideoConfig != 0 /* NOT_PRESENT */;
-                        mainVideoConfig = options.mainVideoConfig;
-                        // start is allowed to be called twice only when the first call starts audio,
-                        // and the second call adds video. So a different options.remoteUri for adding
-                        // video does not make sense
-                        remoteUri = remoteUri || options.remoteUri;
+                        //#endregion onHold
                         options = null;
-                        check.state(state(), [
-                            Internal.Modality.State.Disconnected,
-                            Internal.Modality.State.Notified,
-                            Internal.Modality.State.Connected
-                        ]);
-                        if (state() == Internal.Modality.State.Disconnected ||
-                            state() == Internal.Modality.State.Notified) {
+                        ucwa.event(onServerEvent);
+                        state.changed(function (newState, reason, oldState) {
+                            log('AudioVideoSession(' + modelId + ')::state: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        });
+                        audioState.changed(function (newState, reason, oldState) {
+                            log('AudioVideoSession(' + modelId + ')::audioState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        });
+                        videoState.changed(function (newState, reason, oldState) {
+                            log('AudioVideoSession(' + modelId + ')::videoState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        });
+                        state.when(Internal.Modality.State.Disconnected, function () {
+                            audioState(Internal.Modality.State.Disconnected);
+                            videoState(Internal.Modality.State.Disconnected);
+                        });
+                        // note that both reset* methods will be called with the "reason" parameter if the
+                        // reason was set when property values were changed.
+                        videoState.when(Internal.Modality.State.Disconnected, resetVideo);
+                        audioState.when(Internal.Modality.State.Disconnected, resetAudio);
+                        participants.removed(function (p) {
+                            var id = p[Internal.sInternal].audioSourceId();
+                            delete recentActiveSpeakers[id];
+                            if (activeSourceId == id)
+                                activeSourceId = -1;
+                        });
+                        setVideoRendering(selfVideoStream, true);
+                        if (!isConferencing())
+                            setVideoRendering(mainVideoStream, false);
+                        //#region self
+                        extend(self, {
+                            state: state.asReadOnly(),
+                            audioState: audioState.asReadOnly(),
+                            videoState: videoState.asReadOnly(),
+                            start: async(start),
+                            stop: async(stop),
+                            sendDtmf: sendDtmf,
+                            changed: changed.observer,
+                            escalated: escalated.observer,
+                            muted: muted,
+                            onHold: onHold,
+                            selfVideoStream: selfVideoStream,
+                            showParticipantVideo: showParticipantVideo,
+                            removeParticipantVideo: removeParticipantVideo,
+                            removeVideo: async(removeAllVideo)
+                        });
+                        if (invitation) {
+                            // incoming call
+                            extend(self, {
+                                from: invitation.from,
+                                accept: async(accept)
+                            });
+                        }
+                        //#endregion
+                        //#region private utilities
+                        function initMedia() {
+                            return mediaConfig ?
+                                Task.wait(mediaConfig) :
+                                mediaPlugin.getMediaConfig() // otherwise load it and return when it becomes available
+                                    .then(function (mc) {
+                                    mediaConfig = mc;
+                                    return mediaConfig;
+                                });
+                        }
+                        function isConferencing() {
+                            var convState = rConversation && rConversation.get('state', '');
+                            // TODO: move Conversation.State to model.common.js and use enum here
+                            return convState == 'Conferencing' || convState == 'Conferenced';
+                        }
+                        function getRenegotiationsHref() {
+                            var renegoHref, negoSession, negotiated = filter(values(avSessions), function (session) {
+                                return session.negotiated;
+                            });
+                            if (negotiated.length > 0) {
+                                assert(negotiated.length == 1);
+                                negoSession = negotiated[0];
+                                renegoHref = negoSession.resumeAudioVideoUri ||
+                                    negoSession.resource.link('renegotiations').href;
+                                assert(renegoHref);
+                            }
+                            return renegoHref;
+                        }
+                        function setNegotiatedSession(sctx) {
+                            foreach(avSessions, function (session) {
+                                if (session.resource.get('sessionContext') == sctx)
+                                    session.negotiated = true;
+                            });
+                        }
+                        // switches video rendering on/off for 1:1 conversations when video starts/stops streaming 
+                        // and when video container is set/changed/nulled
+                        function setVideoRendering(videoStream, isPreview) {
+                            videoStream._isFlowing.changed(function (val) {
+                                if (val)
+                                    showVideo(videoStream, isPreview);
+                                else
+                                    removeVideo(videoStream, isPreview);
+                            });
+                            videoStream.source.sink.container.changed(function (newVal, reason, oldVal) {
+                                if (videoStream._isFlowing()) {
+                                    if (oldVal)
+                                        removeVideo(videoStream, isPreview);
+                                    if (newVal)
+                                        showVideo(videoStream, isPreview);
+                                }
+                            });
+                        }
+                        // called when we stop 1:1 video (including escalation to a meeting)
+                        function removeAllVideo() {
+                            removeVideo(mainVideoStream, false);
+                            removeVideo(selfVideoStream, true);
+                            mainVideoStream._isFlowing(false);
+                            selfVideoStream._isFlowing(false);
+                            selfParticipant[Internal.sInternal].setVideoStream(null);
+                            if (participants.size() > 0) {
+                                participants(0)[Internal.sInternal].setVideoStream(null);
+                                participants(0)[Internal.sInternal].setVideoStarted(void 0);
+                            }
+                        }
+                        function resetVideo(reason) {
+                            participants.each(function (p) {
+                                // reset the participant video stream source to an empty stream
+                                p[Internal.sInternal].setVideoStream(null);
+                                if (!isConferencing())
+                                    p[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
+                            });
+                            mainVideoStream._isFlowing(false);
+                            selfVideoStream._isFlowing(false);
+                            videoStreams.empty();
+                            selfParticipant[Internal.sInternal].setVideoStream(null);
+                            if (reason !== Internal.sEscalation)
+                                selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
+                        }
+                        function resetAudio() {
+                            if (!isConferencing() && participants(0))
+                                participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Disconnected);
+                            // The audio state of self participant is replaced by AudioVideoModality::audioState 
+                            // in the conversation ctor, so resetting it as we do in resetVideo is useless:
+                            // if (reason !== sEscalation)
+                            //    selfParticipant[sInternal].audioState(Modality.State.Disconnected);
+                        }
+                        function enumcastStreamState(meState) {
+                            var ss = Internal.MediaEnum.StreamState, state;
+                            switch (meState) {
+                                case 1 /* STREAM_STARTED */:
+                                    state = ss.Started;
+                                    break;
+                                case 2 /* STREAM_ACTIVE */:
+                                    state = ss.Active;
+                                    break;
+                                case 3 /* STREAM_INACTIVE */:
+                                    state = ss.Inactive;
+                                    break;
+                                case 4 /* STREAM_STOPPED */:
+                                    state = ss.Stopped;
+                                    break;
+                            }
+                            return state;
+                        }
+                        // Check if the SDP offer/answer contains a=inactive field,
+                        // which indicates it is a renegotiation triggered when a
+                        // participant holds a call.
+                        function isHoldRequest(sdp) {
+                            return /\ba=inactive\b/gmi.test(sdp);
+                        }
+                        function isAudioInvitation() {
+                            return invitation && !invitation.hasVideo() ||
+                                rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
+                                    conversation.meeting.availableModalities.audio() &&
+                                    !conversation.meeting.availableModalities.video();
+                        }
+                        function isVideoInvitation() {
+                            return invitation && invitation.hasVideo() ||
+                                rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
+                                    conversation.meeting.availableModalities.video();
+                        }
+                        //#endregion
+                        //#region public methods
+                        //#region start
+                        /**
+                         * Starts an outgoing Audio/Video call
+                         *
+                         *  @param {String} remoteUri
+                         *  @param {MediaEnum.MediaConfig} audioConfig
+                         *  @param {MediaEnum.MediaConfig} mainVideoConfig
+                         *  @param {Object} [video]
+                         *
+                         *  @returns {Promise}
+                         *
+                         *  Starting a P2P audio call
+                         *  - Creates an AVComponent in the media plugin.
+                         *  - Invokes AVComponent::SetCallConfig.
+                         *  - Invokes AVComponent::SetMediaConfig.
+                         *  - Gets an OFFER_READY event from the AVComponent.
+                         *  - Sends a POST request to startAudioVideo link with the SDP offer.
+                         *  - Gets an "audioVideoInvitation started" event from UCWA.
+                         *  - Gets an "audioVideoNegotiation started" event from UCWA with a provisional SDP answer.
+                         *  - Invokes AVComponent::SetProvisionalAnswer.
+                         *  -  Gets an "audioVideoSession added" event.
+                         *  -  Gets an "audioVideoNegotiation completed" event with a final SDP answer.
+                         *  -  Invokes AVComponent::SetFinalAnswer.
+                         *  -  Gets a "audioVideoInvitation completed" event from UCWA.
+                         *  -  Invokes AVComponent::CompleteNegotiation.
+                         *  -  Gets a "audioVideoRenegotiation started" event from UCWA.
+                         *  -  Gets a OFFER_READY event from AVComponent with a new SDP answer.
+                         *  -  Sends a POST request to audioVideoSession/renegotiations link.
+                         *  -  Gets a "audioVideoRenegotiation completed" event from UCWA with a new SDP answer.
+                         *  -  Invokes AVComponent::SetFinalAnswer.
+                         *  -  Invokes AVComponent::CompleteNegotiation.
+                         *
+                         *  Joining an audio conference call the client follows the same sequence with one exception:
+                         *  there is no initial negotiation - all "audioVideoNegotiation" events are absent.
+                         *
+                         *  If the client calls an invalid sip uri, it receives a single "audioVideoInvitation
+                         *  completed" event with failure status and appropriate error code.
+                         */
+                        function start(options) {
+                            // prohibit start of audio or video when that modality is already started
+                            if ((options.mainVideoConfig == 3 /* BOTH */ && activeModalities.video) ||
+                                (options.mainVideoConfig == 0 /* NOT_PRESENT */ &&
+                                    options.audioConfig == 3 /* BOTH */ && activeModalities.audio))
+                                return Task.wait('already started');
+                            check.state(onHold(), false);
+                            var audioConfig = options.audioConfig, previewContainer = options.video && options.video.previewContainer, videoContainer = options.video && options.video.container, startsVideo = options.mainVideoConfig != 0 /* NOT_PRESENT */;
+                            mainVideoConfig = options.mainVideoConfig;
+                            // start is allowed to be called twice only when the first call starts audio,
+                            // and the second call adds video. So a different options.remoteUri for adding
+                            // video does not make sense
+                            remoteUri = remoteUri || options.remoteUri;
+                            options = null;
+                            check.state(state(), [
+                                Internal.Modality.State.Disconnected,
+                                Internal.Modality.State.Notified,
+                                Internal.Modality.State.Connected
+                            ]);
+                            if (state() == Internal.Modality.State.Disconnected ||
+                                state() == Internal.Modality.State.Notified) {
+                                state(Internal.Modality.State.Connecting);
+                            }
+                            // to keep parity with Skype not only we need to set the local participant AV state
+                            // in a 1:1 call but also to fake the remote participant AV state; and we always check
+                            // for the remote participant existence because the call can be started with the
+                            // empty participants collection by specifying the remote sip uri.
+                            if (audioState() == Internal.Modality.State.Disconnected ||
+                                audioState() == Internal.Modality.State.Notified) {
+                                audioState(Internal.Modality.State.Connecting);
+                                if (!isConferencing() && participants.size() > 0)
+                                    participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Connecting);
+                            }
+                            if (videoState() == Internal.Modality.State.Disconnected && startsVideo ||
+                                videoState() == Internal.Modality.State.Notified) {
+                                videoState(Internal.Modality.State.Connecting);
+                                if (!isConferencing() && participants.size() > 0)
+                                    participants(0)[Internal.sInternal].videoState(Internal.Modality.State.Connecting);
+                            }
+                            return initMedia().then(function () {
+                                if (!pcAV) {
+                                    pcAV = mediaPlugin.createComponent({
+                                        type: 'AVComponent',
+                                        hide: true
+                                    });
+                                    pcAV.event(onPluginComponentEvent, 'async');
+                                    return pcAV.load(localUri, isConferencing() ? guid() : remoteUri, threadId, isConferencing(), 
+                                    // max num of video channels - use 1 for P2P, otherwise the media
+                                    // manager will fail the call constructed by the media plugin.
+                                    isConferencing() ? mediaConfig.maxVideoChannelCount() : 1, mediaConfig.audioVideoSecurityLevel());
+                                }
+                            }).then(function () {
+                                var moreChannels = mainVideoConfig != 0 /* NOT_PRESENT */ && isConferencing();
+                                // select default devices if we have not selected a device explicitly
+                                if (devices && !devices.selectedMicrophone())
+                                    mediaConfig.setDefaultDevices();
+                                pcAV.invoke('SetCallConfig', mediaConfig.isInternal() ?
+                                    Internal.MediaEnum.PreferredMediaAddressType.Direct :
+                                    Internal.MediaEnum.PreferredMediaAddressType.Relay);
+                                // hook up the preview video stream - this will retain the video container if it was set for
+                                // self participant.
+                                // NB: we need to do it even if it's just an audio call. If the video is added later we won't
+                                // receive another invitiation (it's a renegotiation of an established AV connection), so
+                                // we won't have a chance to call accept method again.
+                                selfParticipant[Internal.sInternal].setVideoStream(selfVideoStream);
+                                if (videoContainer)
+                                    mainVideoStream.source.sink.container(videoContainer);
+                                if (previewContainer)
+                                    selfVideoStream.source.sink.container(previewContainer);
+                                pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
+                                mainVideoConfig, // main video configuration
+                                moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
+                                moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
+                                0 /* NOT_PRESENT */); // panoVideoConfig
+                                if (audioState() == Internal.Modality.State.Connecting && !isConferencing() && participants.size() > 0)
+                                    participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Ringing);
+                                // expect an OFFER_READY event from the media plugin
+                                dfdStart = new Task('waiting for an OFFER_READY event from the media plugin');
+                                return dfdStart.promise;
+                            }).then(null, function (error) {
+                                if (!rAVInvitation) {
+                                    // if the AV invitation was not sent (rAVInvitation is undefined) release the plugin component.
+                                    cleanup();
+                                }
+                                else if (rAVInvitation.hasLink('cancel')) {
+                                    // if the AV invitation was sent and the "audioVideoInvitation started" event was received we have
+                                    // the cancel link and we can terminate the call here.
+                                    ucwa.send('POST', rAVInvitation.link('cancel').href, { nobatch: true });
+                                }
+                                else {
+                                }
+                                state(Internal.Modality.State.Disconnected);
+                                audioState(Internal.Modality.State.Disconnected);
+                                videoState(Internal.Modality.State.Disconnected);
+                                throw error;
+                            });
+                        }
+                        //#endregion
+                        //#region accept
+                        /**
+                         * Accepts an incoming Audio/Video invitation.
+                         *
+                         * @param {Dictionary} [video] - The video window container holder.
+                         * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
+                         *
+                         * @returns {Promise}
+                         *
+                         * Accepting an incoming call invitation:
+                         *
+                         *  - Creates an AVComponent with the media plugin.
+                         *  - Invokes AVComponent::Load and waits until it gets loaded.
+                         *  - Invokes AVComponent::SetCallConfig.
+                         *  - Invokes AVComponent::SetAcceptedMedia and specifies that no video is needed.
+                         *  - Invokes AVComponent::SetOffer with the SDPs received from the remote party.
+                         *  - Handles the ANSWER_READY event from the media plugin: the event contains an SDP.
+                         *  - Sends a POST audioVideoInvitation/acceptWithAnswer with the SDP from the media plugin.
+                         *  - Receives an "audioVideoinvitation completed" event from UCWA
+                         *  - Receives an "audioVideoRenegotiation started" event with a new SDP from the remote party.
+                         *  - Invokes AVComponent::SetAcceptedMedia.
+                         *  - Invokes AVComponent::SetOffer with the new SDP given in the renegotiation event.
+                         *  - Handles another ANSWER_READY event from the media plugin with an SDP answer.
+                         *  - Sends a POST audioVideoRenegotiation/answer with the SDP answer.
+                         *  - Receives a "audioVideoRenegotiation completed" event from UCWA.
+                         *  - Invokes AVComponent::CompleteNegotiation
+                         */
+                        function accept(options) {
+                            assert(invitation, 'This is an outgoing call, so it cannot be "accepted"');
+                            assert(!isConferencing(), 'This is a conference'); // accept is used in P2P only
+                            assert(participants.size() == 1, 'The caller is not in participants');
+                            var video = options && options.video, videoContainer = video && video.container, previewContainer = video && video.previewContainer;
+                            mainVideoConfig = video ? 3 /* BOTH */ :
+                                2 /* RECEIVE */;
                             state(Internal.Modality.State.Connecting);
-                        }
-                        // to keep parity with Skype not only we need to set the local participant AV state
-                        // in a 1:1 call but also to fake the remote participant AV state; and we always check
-                        // for the remote participant existence because the call can be started with the
-                        // empty participants collection by specifying the remote sip uri.
-                        if (audioState() == Internal.Modality.State.Disconnected ||
-                            audioState() == Internal.Modality.State.Notified) {
                             audioState(Internal.Modality.State.Connecting);
-                            if (!isConferencing() && participants.size() > 0)
-                                participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Connecting);
-                        }
-                        if (videoState() == Internal.Modality.State.Disconnected && startsVideo ||
-                            videoState() == Internal.Modality.State.Notified) {
-                            videoState(Internal.Modality.State.Connecting);
-                            if (!isConferencing() && participants.size() > 0)
+                            participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Connecting);
+                            if (invitation.hasVideo()) {
+                                videoState(Internal.Modality.State.Connecting);
                                 participants(0)[Internal.sInternal].videoState(Internal.Modality.State.Connecting);
-                        }
-                        return initMedia().then(function () {
-                            if (!pcAV) {
+                            }
+                            return initMedia().then(function () {
+                                // the caller has already hung up
+                                if (state() == Internal.Modality.State.Disconnected)
+                                    throw Internal.EInvitationFailed(state.reason);
+                                assert(!pcAV);
                                 pcAV = mediaPlugin.createComponent({
                                     type: 'AVComponent',
                                     hide: true
                                 });
                                 pcAV.event(onPluginComponentEvent, 'async');
-                                return pcAV.load(localUri, isConferencing() ? guid() : remoteUri, threadId, isConferencing(), 
-                                // max num of video channels - use 1 for P2P, otherwise the media
-                                // manager will fail the call constructed by the media plugin.
-                                isConferencing() ? mediaConfig.maxVideoChannelCount() : 1, mediaConfig.audioVideoSecurityLevel());
-                            }
-                        }).then(function () {
-                            var moreChannels = mainVideoConfig != 0 /* NOT_PRESENT */ && isConferencing();
-                            // select default devices if we have not selected a device explicitly
-                            if (devices && !devices.selectedMicrophone())
-                                mediaConfig.setDefaultDevices();
-                            pcAV.invoke('SetCallConfig', mediaConfig.isInternal() ?
-                                Internal.MediaEnum.PreferredMediaAddressType.Direct :
-                                Internal.MediaEnum.PreferredMediaAddressType.Relay);
-                            // hook up the preview video stream - this will retain the video container if it was set for
-                            // self participant.
-                            // NB: we need to do it even if it's just an audio call. If the video is added later we won't
-                            // receive another invitiation (it's a renegotiation of an established AV connection), so
-                            // we won't have a chance to call accept method again.
-                            selfParticipant[Internal.sInternal].setVideoStream(selfVideoStream);
-                            if (videoContainer)
-                                mainVideoStream.source.sink.container(videoContainer);
-                            if (previewContainer)
-                                selfVideoStream.source.sink.container(previewContainer);
-                            pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
-                            mainVideoConfig, // main video configuration
-                            moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
-                            moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
-                            0 /* NOT_PRESENT */); // panoVideoConfig
-                            if (audioState() == Internal.Modality.State.Connecting && !isConferencing() && participants.size() > 0)
-                                participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Ringing);
-                            // expect an OFFER_READY event from the media plugin
-                            dfdStart = new Task('waiting for an OFFER_READY event from the media plugin');
-                            return dfdStart.promise;
-                        }).then(null, function (error) {
-                            if (!rAVInvitation) {
-                                // if the AV invitation was not sent (rAVInvitation is undefined) release the plugin component.
+                                return pcAV.load(localUri, invitation.from.uri(), invitation.resource.get('threadId'), false, // isConference - accept is used in P2P only
+                                1, // max num of video channels - only the main video channel is used in P2P (don't change,
+                                // otherwise the media manager will fail the call constructed by the media plugin)
+                                mediaConfig.audioVideoSecurityLevel());
+                            }).then(function () {
+                                // the caller has already hung up
+                                if (state() == Internal.Modality.State.Disconnected)
+                                    throw Internal.EInvitationFailed(state.reason);
+                                // select default devices if we have not selected a device explicitly
+                                if (devices && !devices.selectedMicrophone())
+                                    mediaConfig.setDefaultDevices();
+                                // hook up the preview video stream - this will retain the video container if it was set for
+                                // self participant.
+                                // NB: we need to do it even if it's just an audio call. If the video is added later we won't
+                                // receive another invitiation (it's a renegotiation of an established AV connection), so
+                                // we won't have a chance to call accept method again.
+                                selfParticipant[Internal.sInternal].setVideoStream(selfVideoStream);
+                                if (videoContainer)
+                                    mainVideoStream.source.sink.container(videoContainer);
+                                if (previewContainer)
+                                    selfVideoStream.source.sink.container(previewContainer);
+                                pcAV.invoke('SetCallConfig', mediaConfig.isInternal() ?
+                                    Internal.MediaEnum.PreferredMediaAddressType.Direct :
+                                    Internal.MediaEnum.PreferredMediaAddressType.Relay);
+                                pcAV.invoke('SetAcceptedMedia', 3 /* BOTH */, // audio
+                                video ?
+                                    3 /* BOTH */ :
+                                    2 /* RECEIVE */);
+                                // expect the ANSWER_READY event from the plugin after this call
+                                setOffer(invitation.offers);
+                                assert(!dfdAccept);
+                                dfdAccept = new Task();
+                                dfdAccept.status('awaiting an ANSWER_READY event from the media plugin');
+                                return dfdAccept.promise;
+                            }).then(null, function (error) {
+                                state(Internal.Modality.State.Disconnected);
+                                audioState(Internal.Modality.State.Disconnected);
+                                videoState(Internal.Modality.State.Disconnected);
                                 cleanup();
-                            }
-                            else if (rAVInvitation.hasLink('cancel')) {
-                                // if the AV invitation was sent and the "audioVideoInvitation started" event was received we have
-                                // the cancel link and we can terminate the call here.
-                                ucwa.send('POST', rAVInvitation.link('cancel').href, { nobatch: true });
+                                throw error;
+                            });
+                        }
+                        //#endregion
+                        //#region stop
+                        /**
+                         * Stops Audio/Video session
+                         *
+                         * @param {String} [reason] - if equals 'video', only video is stopped, if omitted both audio and video are stopped.
+                         */
+                        function stop(reason) {
+                            // cancel start if stop is called during connecting
+                            if (state() == Internal.Modality.State.Connecting)
+                                return dfdStart.promise.cancel();
+                            if (reason == 'video') {
+                                if (isConferencing()) {
+                                    participants.each(function (p) {
+                                        p.video.channels(0).isStarted(false);
+                                    });
+                                }
+                                var audioConfig = onHold() ?
+                                    4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
+                                mainVideoConfig = 0 /* NOT_PRESENT */;
+                                pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
+                                mainVideoConfig, // main video configuration
+                                isConferencing() ? mediaConfig.maxVideoChannelCount() - 1 : 0, // video channel count
+                                0 /* NOT_PRESENT */, // videoConfig
+                                0 /* NOT_PRESENT */); // panoVideoConfig
                             }
                             else {
+                                cleanup(reason);
                             }
-                            state(Internal.Modality.State.Disconnected);
-                            audioState(Internal.Modality.State.Disconnected);
-                            videoState(Internal.Modality.State.Disconnected);
-                            throw error;
-                        });
-                    }
-                    //#endregion
-                    //#region accept
-                    /**
-                     * Accepts an incoming Audio/Video invitation.
-                     *
-                     * @param {Dictionary} [video] - The video window container holder.
-                     * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
-                     *
-                     * @returns {Promise}
-                     *
-                     * Accepting an incoming call invitation:
-                     *
-                     *  - Creates an AVComponent with the media plugin.
-                     *  - Invokes AVComponent::Load and waits until it gets loaded.
-                     *  - Invokes AVComponent::SetCallConfig.
-                     *  - Invokes AVComponent::SetAcceptedMedia and specifies that no video is needed.
-                     *  - Invokes AVComponent::SetOffer with the SDPs received from the remote party.
-                     *  - Handles the ANSWER_READY event from the media plugin: the event contains an SDP.
-                     *  - Sends a POST audioVideoInvitation/acceptWithAnswer with the SDP from the media plugin.
-                     *  - Receives an "audioVideoinvitation completed" event from UCWA
-                     *  - Receives an "audioVideoRenegotiation started" event with a new SDP from the remote party.
-                     *  - Invokes AVComponent::SetAcceptedMedia.
-                     *  - Invokes AVComponent::SetOffer with the new SDP given in the renegotiation event.
-                     *  - Handles another ANSWER_READY event from the media plugin with an SDP answer.
-                     *  - Sends a POST audioVideoRenegotiation/answer with the SDP answer.
-                     *  - Receives a "audioVideoRenegotiation completed" event from UCWA.
-                     *  - Invokes AVComponent::CompleteNegotiation
-                     */
-                    function accept(options) {
-                        assert(invitation, 'This is an outgoing call, so it cannot be "accepted"');
-                        assert(!isConferencing(), 'This is a conference'); // accept is used in P2P only
-                        assert(participants.size() == 1, 'The caller is not in participants');
-                        var video = options && options.video, videoContainer = video && video.container, previewContainer = video && video.previewContainer;
-                        mainVideoConfig = video ? 3 /* BOTH */ :
-                            2 /* RECEIVE */;
-                        state(Internal.Modality.State.Connecting);
-                        audioState(Internal.Modality.State.Connecting);
-                        participants(0)[Internal.sInternal].audioState(Internal.Modality.State.Connecting);
-                        if (invitation.hasVideo()) {
-                            videoState(Internal.Modality.State.Connecting);
-                            participants(0)[Internal.sInternal].videoState(Internal.Modality.State.Connecting);
                         }
-                        return initMedia().then(function () {
-                            // the caller has already hung up
-                            if (state() == Internal.Modality.State.Disconnected)
-                                throw Internal.EInvitationFailed(state.reason);
-                            assert(!pcAV);
-                            pcAV = mediaPlugin.createComponent({
-                                type: 'AVComponent',
-                                hide: true
-                            });
-                            pcAV.event(onPluginComponentEvent, 'async');
-                            return pcAV.load(localUri, invitation.from.uri(), invitation.resource.get('threadId'), false, // isConference - accept is used in P2P only
-                            1, // max num of video channels - only the main video channel is used in P2P (don't change,
-                            // otherwise the media manager will fail the call constructed by the media plugin)
-                            mediaConfig.audioVideoSecurityLevel());
-                        }).then(function () {
-                            // the caller has already hung up
-                            if (state() == Internal.Modality.State.Disconnected)
-                                throw Internal.EInvitationFailed(state.reason);
-                            // select default devices if we have not selected a device explicitly
-                            if (devices && !devices.selectedMicrophone())
-                                mediaConfig.setDefaultDevices();
-                            // hook up the preview video stream - this will retain the video container if it was set for
-                            // self participant.
-                            // NB: we need to do it even if it's just an audio call. If the video is added later we won't
-                            // receive another invitiation (it's a renegotiation of an established AV connection), so
-                            // we won't have a chance to call accept method again.
-                            selfParticipant[Internal.sInternal].setVideoStream(selfVideoStream);
-                            if (videoContainer)
-                                mainVideoStream.source.sink.container(videoContainer);
-                            if (previewContainer)
-                                selfVideoStream.source.sink.container(previewContainer);
-                            pcAV.invoke('SetCallConfig', mediaConfig.isInternal() ?
-                                Internal.MediaEnum.PreferredMediaAddressType.Direct :
-                                Internal.MediaEnum.PreferredMediaAddressType.Relay);
-                            pcAV.invoke('SetAcceptedMedia', 3 /* BOTH */, // audio
-                            video ?
-                                3 /* BOTH */ :
-                                2 /* RECEIVE */);
-                            // expect the ANSWER_READY event from the plugin after this call
-                            setOffer(invitation.offers);
-                            assert(!dfdAccept);
-                            dfdAccept = new Task();
-                            dfdAccept.status('awaiting an ANSWER_READY event from the media plugin');
-                            return dfdAccept.promise;
-                        }).then(null, function (error) {
-                            state(Internal.Modality.State.Disconnected);
-                            audioState(Internal.Modality.State.Disconnected);
-                            videoState(Internal.Modality.State.Disconnected);
-                            cleanup();
-                            throw error;
-                        });
-                    }
-                    //#endregion
-                    //#region stop
-                    /**
-                     * Stops Audio/Video session
-                     *
-                     * @param {String} [reason] - if equals 'video', only video is stopped, if omitted both audio and video are stopped.
-                     */
-                    function stop(reason) {
-                        // cancel start if stop is called during connecting
-                        if (state() == Internal.Modality.State.Connecting)
-                            return dfdStart.promise.cancel();
-                        if (reason == 'video') {
-                            if (isConferencing()) {
-                                participants.each(function (p) {
-                                    p.video.channels(0).isStarted(false);
+                        //#endregion
+                        //#region sendDtmf
+                        /**
+                         * Sends a DTMF tone
+                         *
+                         * @param {String} tone - A DTMF tone from MediaEnum.DtmfTone enumeration
+                         * @returns {String} - The sent tone
+                         */
+                        function sendDtmf(tone) {
+                            if (isNotEmptyString(tone)) {
+                                tone = tone.trim().toLowerCase();
+                                tone = tone.substr(0, 1).toUpperCase() + tone.substr(1);
+                                if (Internal.MediaEnum.DtmfTone[tone] !== undefined) {
+                                    pcAV.invoke('SendDTMF', Internal.MediaEnum.DtmfTone[tone]);
+                                    return tone;
+                                }
+                            }
+                            throw EInvalidArgument('tone', 'out of range');
+                        }
+                        //#endregion
+                        //#region showParticipantVideo
+                        function showParticipantVideo(participant) {
+                            var isFound = false, videoStream, dfd;
+                            if (videoState() != Internal.Modality.State.Connected)
+                                throw EInvalidState(videoState(), Internal.Modality.State.Connected);
+                            if (onHold())
+                                throw Exception('OnHold');
+                            if (participant[Internal.sInternal].isLocal()) {
+                                // undefined means that we just started video, no need to renegotiate
+                                if (participant.video.channels(0).isStarted() === false) {
+                                    mainVideoConfig = 3 /* BOTH */;
+                                    pcAV.invoke('SetMediaConfig', 3 /* BOTH */, // audio configuration
+                                    mainVideoConfig, // main video configuration
+                                    isConferencing() ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
+                                    isConferencing() ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
+                                    0 /* NOT_PRESENT */); // panoVideoConfig
+                                }
+                                return new Task().resolve().promise;
+                            }
+                            else if (isConferencing()) {
+                                // find available stream
+                                if (!mainVideoStream._isAttached()) {
+                                    videoStream = mainVideoStream;
+                                }
+                                else {
+                                    videoStreams.each(function (vs) {
+                                        if (!isFound && !vs._isAttached()) {
+                                            videoStream = vs;
+                                            isFound = true;
+                                        }
+                                    });
+                                }
+                                if (!videoStream) {
+                                    log('Cannot find available stream');
+                                    throw EDoesNotExist('No available stream');
+                                }
+                                participant[Internal.sInternal].setVideoStream(videoStream);
+                                videoStream._isAttached(true);
+                                dfd = showVideo(videoStream, false).then(function () {
+                                    try {
+                                        pcAV.invoke('Subscribe', videoStream._id(), participant[Internal.sInternal].videoSourceId());
+                                    }
+                                    catch (err) {
+                                        log('SUBSCRIBE ERROR: ' + err);
+                                        throw err;
+                                    }
+                                }).then(function () {
+                                    var sink = videoStream.source.sink;
+                                    sink._c(sink.container.changed(function (newVal, reason, oldVal) {
+                                        if (oldVal)
+                                            removeParticipantVideo(participant).then(function () {
+                                                if (newVal)
+                                                    showParticipantVideo(participant);
+                                                else
+                                                    participant[Internal.sInternal].setVideoStarted(false);
+                                            });
+                                    }));
                                 });
                             }
-                            var audioConfig = onHold() ?
-                                4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
-                            mainVideoConfig = 0 /* NOT_PRESENT */;
-                            pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
-                            mainVideoConfig, // main video configuration
-                            isConferencing() ? mediaConfig.maxVideoChannelCount() - 1 : 0, // video channel count
-                            0 /* NOT_PRESENT */, // videoConfig
-                            0 /* NOT_PRESENT */); // panoVideoConfig
-                        }
-                        else {
-                            cleanup(reason);
-                        }
-                    }
-                    //#endregion
-                    //#region sendDtmf
-                    /**
-                     * Sends a DTMF tone
-                     *
-                     * @param {String} tone - A DTMF tone from MediaEnum.DtmfTone enumeration
-                     * @returns {String} - The sent tone
-                     */
-                    function sendDtmf(tone) {
-                        if (isNotEmptyString(tone)) {
-                            tone = tone.trim().toLowerCase();
-                            tone = tone.substr(0, 1).toUpperCase() + tone.substr(1);
-                            if (Internal.MediaEnum.DtmfTone[tone] !== undefined) {
-                                pcAV.invoke('SendDTMF', Internal.MediaEnum.DtmfTone[tone]);
-                                return tone;
+                            else {
+                                dfd = new Task().reject(ENotSupported('cannot start remote video in 1:1 conversation')).promise;
                             }
+                            return dfd;
                         }
-                        throw EInvalidArgument('tone', 'out of range');
-                    }
-                    //#endregion
-                    //#region showParticipantVideo
-                    function showParticipantVideo(participant) {
-                        var isFound = false, videoStream, dfd;
-                        if (videoState() != Internal.Modality.State.Connected)
-                            throw EInvalidState(videoState(), Internal.Modality.State.Connected);
-                        if (onHold())
-                            throw Exception('OnHold');
-                        if (participant[Internal.sInternal].isLocal()) {
-                            // undefined means that we just started video, no need to renegotiate
-                            if (participant.video.channels(0).isStarted() === false) {
-                                mainVideoConfig = 3 /* BOTH */;
+                        //#endregion showParticipantVideo
+                        //#region removeParticipantVideo
+                        function removeParticipantVideo(participant) {
+                            var dfd;
+                            if (onHold())
+                                throw Exception('OnHold');
+                            if (participant[Internal.sInternal].isLocal()) {
+                                mainVideoConfig = 2 /* RECEIVE */;
                                 pcAV.invoke('SetMediaConfig', 3 /* BOTH */, // audio configuration
                                 mainVideoConfig, // main video configuration
                                 isConferencing() ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
                                 isConferencing() ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
                                 0 /* NOT_PRESENT */); // panoVideoConfig
+                                return new Task().resolve().promise;
                             }
-                            return new Task().resolve().promise;
-                        }
-                        else if (isConferencing()) {
-                            // find available stream
-                            if (!mainVideoStream._isAttached()) {
-                                videoStream = mainVideoStream;
+                            else if (isConferencing()) {
+                                dfd = Task.wait(null, 'sync').then(function () {
+                                    // NB: this is a sourced stream
+                                    var videoStream = participant.video.channels(0).stream;
+                                    var sink = videoStream.source.sink;
+                                    if (sink._c())
+                                        sink._c().dispose();
+                                    if (videoStream._isAttached()) {
+                                        try {
+                                            pcAV.invoke('Unsubscribe', videoStream._id());
+                                        }
+                                        catch (err) {
+                                            log('UNSUBSCRIBE ERROR: ' + err);
+                                        }
+                                        removeVideo(videoStream, false);
+                                        videoStream._isAttached(false);
+                                        participant[Internal.sInternal].setVideoStream(null);
+                                    }
+                                });
                             }
                             else {
-                                videoStreams.each(function (vs) {
-                                    if (!isFound && !vs._isAttached()) {
-                                        videoStream = vs;
-                                        isFound = true;
-                                    }
-                                });
+                                // in 1:1 we can't remove remote video without stopping video altogether
+                                dfd = new Task().reject(ENotSupported('cannot remove remote video in 1:1 conversation')).promise;
                             }
-                            if (!videoStream) {
-                                log('Cannot find available stream');
-                                throw EDoesNotExist('No available stream');
+                            return dfd;
+                        }
+                        //#endregion removeParticipantVideo
+                        //#endregion public methods
+                        //#region cleanup
+                        // Unsubscribes from server and plugin component events and unloads the plugin component
+                        function cleanup(reason) {
+                            var cDisconnected = Internal.Modality.State.Disconnected;
+                            ucwa.event.off(onServerEvent);
+                            if (pcAV) {
+                                pcAV.event.off(onPluginComponentEvent);
+                                removeAllVideo();
+                                pcAV.invoke('Terminate');
+                                pcAV.unload();
+                                pcAV = null;
                             }
-                            participant[Internal.sInternal].setVideoStream(videoStream);
-                            videoStream._isAttached(true);
-                            dfd = showVideo(videoStream, false).then(function () {
-                                try {
-                                    pcAV.invoke('Subscribe', videoStream._id(), participant[Internal.sInternal].videoSourceId());
-                                }
-                                catch (err) {
-                                    log('SUBSCRIBE ERROR: ' + err);
-                                    throw err;
-                                }
-                            }).then(function () {
-                                var sink = videoStream.source.sink;
-                                sink._c(sink.container.changed(function (newVal, reason, oldVal) {
-                                    if (oldVal)
-                                        removeParticipantVideo(participant).then(function () {
-                                            if (newVal)
-                                                showParticipantVideo(participant);
-                                            else
-                                                participant[Internal.sInternal].setVideoStarted(false);
-                                        });
-                                }));
-                            });
-                        }
-                        else {
-                            dfd = new Task().reject(ENotSupported('cannot start remote video in 1:1 conversation')).promise;
-                        }
-                        return dfd;
-                    }
-                    //#endregion showParticipantVideo
-                    //#region removeParticipantVideo
-                    function removeParticipantVideo(participant) {
-                        var dfd;
-                        if (onHold())
-                            throw Exception('OnHold');
-                        if (participant[Internal.sInternal].isLocal()) {
-                            mainVideoConfig = 2 /* RECEIVE */;
-                            pcAV.invoke('SetMediaConfig', 3 /* BOTH */, // audio configuration
-                            mainVideoConfig, // main video configuration
-                            isConferencing() ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
-                            isConferencing() ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
-                            0 /* NOT_PRESENT */); // panoVideoConfig
-                            return new Task().resolve().promise;
-                        }
-                        else if (isConferencing()) {
-                            dfd = Task.wait(null, 'sync').then(function () {
-                                // NB: this is a sourced stream
-                                var videoStream = participant.video.channels(0).stream;
-                                var sink = videoStream.source.sink;
-                                if (sink._c())
-                                    sink._c().dispose();
-                                if (videoStream._isAttached()) {
-                                    try {
-                                        pcAV.invoke('Unsubscribe', videoStream._id());
-                                    }
-                                    catch (err) {
-                                        log('UNSUBSCRIBE ERROR: ' + err);
-                                    }
-                                    removeVideo(videoStream, false);
-                                    videoStream._isAttached(false);
-                                    participant[Internal.sInternal].setVideoStream(null);
+                            participants.each(function (p) {
+                                // reset the participant video stream source to an empty stream
+                                p[Internal.sInternal].setVideoStream(null);
+                                if (!isConferencing()) {
+                                    p[Internal.sInternal].audioState(cDisconnected);
+                                    p[Internal.sInternal].videoState(cDisconnected);
                                 }
                             });
+                            audioState(cDisconnected /*, reason*/);
+                            videoState(cDisconnected, reason);
                         }
-                        else {
-                            // in 1:1 we can't remove remote video without stopping video altogether
-                            dfd = new Task().reject(ENotSupported('cannot remove remote video in 1:1 conversation')).promise;
-                        }
-                        return dfd;
-                    }
-                    //#endregion removeParticipantVideo
-                    //#endregion public methods
-                    //#region cleanup
-                    // Unsubscribes from server and plugin component events and unloads the plugin component
-                    function cleanup(reason) {
-                        var cDisconnected = Internal.Modality.State.Disconnected;
-                        ucwa.event.off(onServerEvent);
-                        if (pcAV) {
-                            pcAV.event.off(onPluginComponentEvent);
-                            removeAllVideo();
-                            pcAV.invoke('Terminate');
-                            pcAV.unload();
-                            pcAV = null;
-                        }
-                        participants.each(function (p) {
-                            // reset the participant video stream source to an empty stream
-                            p[Internal.sInternal].setVideoStream(null);
-                            if (!isConferencing()) {
-                                p[Internal.sInternal].audioState(cDisconnected);
-                                p[Internal.sInternal].videoState(cDisconnected);
-                            }
-                        });
-                        audioState(cDisconnected /*, reason*/);
-                        videoState(cDisconnected, reason);
-                    }
-                    //#endregion
-                    //#region videoWindow
-                    /**
-                     * Creates a video window and anchors it in the parent DOM element
-                     *
-                     * The whole area of the parent element will be occupied by the video. Video preview window sized to
-                     * 1/3rd of the remote window and is placed in the lower-right corner. Currently, its flicker makes
-                     * the preview unusable
-                     */
-                    function showVideo(vs, isPreview) {
-                        var sink = vs.source.sink;
-                        if (vs._id() && sink.container()) {
-                            // TODO: this is a temporary check to avoid repeated window creation
-                            // when this method is called more than once ('participantVideo updated')
-                            if (sink._state() == PluginComponent.State.Unloaded) {
-                                return sink._init().then(function () {
-                                    pcAV.invoke('SetVideoWindow', vs._id(), isPreview ? Internal.MediaEnum.MediaDeviceType.PREVIEW : Internal.MediaEnum.MediaDeviceType.RENDER, sink._videoWindow(), sink._format(), 1 /* SmartCrop */);
-                                    sink._s(sink._size.changed(bind(onVideoResized, vs, isPreview)));
-                                });
-                            }
-                        }
-                    }
-                    /**
-                     * Removes the video window from the parent DOM element
-                     */
-                    function removeVideo(vs, isPreview) {
-                        var sink = vs.source.sink;
-                        if (vs._id() && sink._videoWindow()) {
-                            pcAV.invoke('RemoveVideoWindow', vs._id(), isPreview ? Internal.MediaEnum.MediaDeviceType.PREVIEW : Internal.MediaEnum.MediaDeviceType.RENDER, sink._videoWindow());
-                            sink._uninit();
-                            if (sink._s())
-                                sink._s().dispose();
-                        }
-                    }
-                    /**
-                     * Video 'resized' event handler
-                     */
-                    function onVideoResized(vs, isPreview, size) {
-                        // notify the AVComponent that the video window size has changed
-                        pcAV.invoke('SetVideoWindowSize', vs._id(), vs.source.sink._videoWindow(), isPreview, size.width, size.height);
-                    }
-                    //#endregion videoWindow
-                    //#region server events
-                    function onServerEvent(event) {
-                        var id = event.target.rel + ' ' + event.type;
-                        var handler = ucwaEventHandlers[id];
-                        if (handler) {
-                            // debugger; // this is to let debug the handler of the event
-                            handler(event.status, event.resource, event);
-                        }
-                    }
-                    var ucwaEventHandlers = {
-                        // this is the first event received in any AV call setup (except calling an invalid SIP uri,
-                        // in which case UCWA sends the 'audioVideoInvitation completed' event only).
-                        'audioVideoInvitation started': function (status, resource) {
-                            // set the invitation resource for the outgoing AV session (for the incoming call
-                            // audioVideoSession is initialized with the received invitation resource)
-                            if (resource.get('direction') == 'Outgoing' &&
-                                resource.get('sessionContext') == sessionContext) {
-                                // if the user canceled the call before we received this event terminate the call
-                                // on the server and unload the AV component.
-                                if (state() == Internal.Modality.State.Disconnected) {
-                                    if (resource.hasLink('cancel'))
-                                        ucwa.send('POST', resource.link('cancel').href, { nobatch: true });
-                                    cleanup();
-                                }
-                                else {
-                                    rAVInvitation = resource;
-                                    dfdStart.status('awaiting "audioVideoNegotiation started or completed" event from UCWA');
-                                }
-                            }
-                        },
-                        // this event is received if we started an outgoing AV call as the first conversation modality
-                        // using the global startAudioVideo link
-                        'conversation added': function (status, resource) {
-                            if (resource.get('threadId') == threadId)
-                                rConversation = resource;
-                        },
-                        // this event is received during outgoing P2P AV call setup (early media?)
-                        'audioVideoNegotiation started': function (status, resource, event) {
-                            if (event.sender.href == rAVInvitation.href) {
-                                setProvisionalAnswer(resource.link('mediaProvisionalAnswer').href, resource.get('remoteEndpoint'));
-                                dfdStart.status('awaiting "audioVideoNegotiation completed" event from UCWA');
-                            }
-                        },
-                        // this event is received during outgoing P2P or conference call setup.
-                        // If the negotiation completed successfully the event resource contains session context,
-                        // a link to matching audioVideoSession and the remoteEndpoint of that session.
-                        // If the call was declined or not answered we have negotiation href only.
-                        'audioVideoNegotiation completed': function (status, resource, event) {
-                            var href;
-                            if (event.sender.href == rAVInvitation.href) {
-                                switch (status) {
-                                    case 'Success':
-                                        // "audioVideoNegotiation completed" may arrive before the corresponding
-                                        // "audioVideoSession added" event when the call is forwarded to voice mail.
-                                        // in this case we create an entry in avSessions and expect to fill it out
-                                        // after the session added event arrives.
-                                        href = resource.link('audioVideoSession').href;
-                                        avSessions[href] = avSessions[href] || {};
-                                        avSessions[href].negotiated = true;
-                                        setFinalAnswer(resource.link('mediaAnswer').href, resource.get('remoteEndpoint'));
-                                        dfdStart.status('awaiting "audioVideoInvitation completed" event from UCWA');
-                                        break;
-                                    case 'Failure':
-                                        if (event.reason.subcode != 'Ended' && event.reason.subcode != 'ConnectedElsewhere')
-                                            dfdStart.status(event.reason && event.reason.message);
-                                        break;
-                                }
-                            }
-                        },
-                        // during an outgoing call the server may set up more than one audioVideoSession, because
-                        // the remote sip uri that we are calling may be signed in on more than one endpoint.
-                        // Also, if the remote party does not accept the call the UCWA server may redirect the
-                        // client to a media server so that the client may leave a voice mail; during this process
-                        // the UCWA server will create another audioVideoSession and delete the original session.
-                        // The next two handlers keep track of audioVideoSessions.
-                        'audioVideoSession added': function (status, resource) {
-                            var href = resource.href;
-                            if (resource.get('sessionContext') == sessionContext) {
-                                avSessions[href] = avSessions[href] || {};
-                                avSessions[href].resource = resource;
-                            }
-                        },
-                        'audioVideoSession deleted': function (status, resource, event) {
-                            delete avSessions[event.target.href];
-                            // this event is the only indication of a failed escalation; we need to notify
-                            // AudioVideoModality so it can force the cleanup of this session (technically there
-                            // a "participantInvitation completed" event with code == ServiceFailure and
-                            // subcode == EscalationFailed but it is received by the client that issued the
-                            // invitation only).
-                            if (fEscalation && isEmptyObject(avSessions)) {
-                                escalated.fire('failure');
-                                fEscalation = false;
-                            }
-                        },
-                        // this event is received during any AV call setup
-                        'audioVideoInvitation completed': function (status, resource, event) {
-                            // check for rAVInvitation is needed because this event may arrive before we
-                            // even get a response to startAudioVideo post if we call an invalid SIP uri,
-                            // so rAVInvitation may be undefined.
-                            // Note that completion of an outgoing invitation is handled by sendOffer method
-                            if (rAVInvitation && rAVInvitation.href == resource.href &&
-                                resource.get('direction') == 'Incoming') {
-                                if (status == 'Success') {
-                                    try {
-                                        // there are no audioVideoNegotiation events in the incoming P2P call setup,
-                                        // so we set negotiated flag for the cached audioVideoSession here
-                                        setNegotiatedSession(resource.get('sessionContext'));
-                                        completeNegotiation(status, event.reason);
-                                        // if AV is added by a remote participant in a 1:1 conversation which already
-                                        // has another modality (messaging) then "participantAudio/Video added" events
-                                        // arrive before "audioVideoInvitation started" event, i.e. before this
-                                        // AudioVideoSession object exists. So we need to set the AV properties of the
-                                        // remote participant here:
-                                        // TODO: check if they were not set before : Accepting the AV invitation that created the call
-                                        assert(!isConferencing());
-                                        var p = participants(0);
-                                        if (p) {
-                                            p[Internal.sInternal].audioState(Internal.Modality.State.Connected);
-                                            if (videoState() == Internal.Modality.State.Connected) {
-                                                p[Internal.sInternal].setVideoStream(mainVideoStream);
-                                                p[Internal.sInternal].videoState(Internal.Modality.State.Connected);
-                                            }
-                                        }
-                                        dfdAccept.resolve();
-                                        state(Internal.Modality.State.Connected);
-                                    }
-                                    catch (error) {
-                                        dfdAccept.reject(error);
-                                        state(Internal.Modality.State.Disconnected);
-                                    }
-                                }
-                                else {
-                                    // the caller (remote party) hung up while the call setup was not completed.
-                                    if (dfdAccept)
-                                        dfdAccept.reject(event.reason);
-                                    state(Internal.Modality.State.Disconnected, event.reason);
-                                }
-                            }
-                        },
-                        'audioVideoRenegotiation started': function (status, resource) {
-                            if (resource.link('audioVideoSession').href in avSessions) {
-                                if (resource.get('direction') == 'Incoming') {
-                                    var sdp = DataUri(resource.link('mediaOffer').href).data;
-                                    if (!isConferencing() && participants.size() > 0) {
-                                        remoteHoldState = isHoldRequest(sdp) ?
-                                            RemoteHoldState.HoldOffered : RemoteHoldState.ResumeOffered;
-                                    }
-                                    setRenegotiationOffer(sdp);
-                                    rAVRenegotiation = resource;
-                                }
-                                else if (dfdStart && dfdStart.promise.state() == 'pending') {
-                                    // this is an outgoing renegotiation caused by the second start() call
-                                    // to add video to an audio conversation
-                                    dfdStart.status('Waiting for audioVideoRenegotiation completed event');
-                                }
-                            }
-                        },
-                        'audioVideoRenegotiation completed': function (status, resource, event) {
-                            var href = resource.link('audioVideoSession').href;
-                            if (href in avSessions) {
-                                if (resource.get('direction') == 'Outgoing') {
-                                    assert(resource.get('operationId') in outAvRenegoOpIds);
-                                    delete outAvRenegoOpIds[resource.get('operationId')];
-                                    if (status == 'Success') {
-                                        avSessions[href].renegotiated = true;
-                                        setFinalAnswer(resource.link('mediaAnswer').href, avSessions[href].resource.get('remoteEndpoint'));
-                                    }
-                                    completeNegotiation(status, event.reason);
-                                    if (dfdStart && dfdStart.promise.state() == 'pending') {
-                                        // this is an outgoing renegotiation caused by the second start() call
-                                        // to add video to an audio conversation
-                                        if (status == 'Success')
-                                            dfdStart.resolve();
-                                        else
-                                            dfdStart.reject();
-                                    }
-                                }
-                                else {
-                                    // the renegotiation may be in response to remote participant hold/resume
-                                    if (!isConferencing()) {
-                                        if (remoteHoldState == RemoteHoldState.HoldAnswered)
-                                            remoteHoldState = RemoteHoldState.HoldCompleted;
-                                        else if (remoteHoldState == RemoteHoldState.ResumeAnswered)
-                                            remoteHoldState = RemoteHoldState.ResumeCompleted;
-                                    }
-                                    completeNegotiation(status, event.reason);
-                                }
-                            }
-                        },
-                        'audioVideo updated': function (status, resource, event) {
-                            if (rAVInvitation && resource.href == rAVInvitation.link('audioVideo').href) {
-                                if (resource.get('state') == 'Disconnected') {
-                                    if (rAVInvitation.get('state') == 'Connected') {
-                                        // This is our chance to clean up the established call that is terminated by
-                                        // the remote party. The local party terminates the established call via modality.stop()
-                                        // and hang-ups by either party during call setup are processed by audioVideoInvitation
-                                        // started/completed event handlers.
-                                        cleanup();
-                                        // setting this modality state to disconnected will cause its removal from
-                                        // the conversation
-                                        state(Internal.Modality.State.Disconnected);
-                                    }
-                                }
-                                else if (resource.get('state') == 'Connected' &&
-                                    event.reason && event.reason.subcode == 'SessionSwitched' &&
-                                    resource.link('audioVideoSession').href in avSessions) {
-                                    // this is the escalation confirmation, i.e. this AV session replaced the
-                                    // original P2P AV session
-                                    escalated.fire('success');
-                                    fEscalation = false;
-                                }
-                            }
-                        },
-                        // participantAudio/Video added/deleted events for a localParticipant are used to
-                        // track active modalities of this client
-                        'participantAudio added': onParticipantAudio,
-                        'participantAudio updated': onParticipantAudio,
-                        'participantAudio deleted': onParticipantAudio,
-                        'participantVideo added': onParticipantVideo,
-                        'participantVideo updated': onParticipantVideo,
-                        'participantVideo deleted': onParticipantVideo,
-                        'escalateAudio deleted': function (status, resource, event) {
-                            if (event.target.href == escalateAudioVideoUri)
-                                escalateAudioVideoUri = null;
-                        },
-                        // these events are fired in the later phase of the escalation when the setup of our inactive AV call
-                        // to a conference is finished and we may activate (resume) it.
-                        'resumeAudio added': onResumeAudioVideoAdded,
-                        'resumeAudioVideo added': onResumeAudioVideoAdded,
-                        'resumeAudio deleted': onResumeAudioVideoDeleted,
-                        'resumeAudioVideo deleted': onResumeAudioVideoDeleted
-                    };
-                    // returns a participant object from a participants collection
-                    function getParticipant(href) {
-                        var participant = find(participants(), function (p) { return p[Internal.sHref] == href; });
-                        if (participant)
-                            return participant;
-                        // shortcut for a 1:1 conversation with a participant added to the conversation beforehand
-                        //
-                        // The check for participant size is needed because if the AV conversation is started not with the
-                        // participant from a person model but using the sip uri as a parameter, we would have to rely on
-                        // "participant added" event for the remote guy to become a member of participants collection.
-                        // If miraculously this event arrives after "participantAudio/Video added" we would have an empty
-                        // participants collection here.
-                        if (!isConferencing() && participants.size() == 1)
-                            return participants(0);
-                        // "participantAudio/Video added" event arrives right after "participant added" event. If the
-                        // participant was added to the conversation's participant collection using its contact href,
-                        // the "participant added" event handler is doing another server lookup to match that contact href
-                        // to the participant href. So we can't find that participant here either and we need to do the
-                        // same lookup.
-                        return ucwa.send('GET', href).then(function (r) {
-                            return getParticipant(r.link('contact').href);
-                        });
-                    }
-                    function isInMediaRoster(participant) {
-                        var p = participant[Internal.sInternal];
-                        return pcAV && p.isInMediaRoster[pcAV.id()];
-                    }
-                    function updateMediaRoster(participant, type) {
-                        try {
-                            var method = type == 'add' ? 'AddParticipantInfo' :
-                                type == 'remove' ? 'RemoveParticipantInfo' :
-                                    type == 'update' ? 'UpdateParticipantInfo' :
-                                        assert(false);
-                            var p = participant[Internal.sInternal];
-                            // pcAV may not exist yet when when we join the meeting which participants are already on the AV call.
-                            // In this case 'participantVideo added' events for such participants may come before we finish
-                            // joining the meeting so we have not loaded the plugin AVComponent.
-                            pcAV.invoke(method, p.audioSourceId(), p.videoSourceId(), -1);
-                            p.isInMediaRoster[pcAV.id()] = type != 'remove';
-                            return true;
-                        }
-                        catch (err) {
-                            log('Media Roster ERROR: ' + err);
-                            return false;
-                        }
-                    }
-                    // event handler for "participantAudio added/updated/deleted in participant|localParticipant" events
-                    //  - tracks session audio state (on/off) and participant audio state.
-                    function onParticipantAudio(status, resource, event) {
-                        var scope = event['in'];
-                        if (event.sender.href == rConversation.href && scope) {
-                            if (scope.rel == 'localParticipant') {
-                                switch (event.type) {
-                                    case 'added': // signal for the initial AV session
-                                    case 'updated':
-                                        if (isConferencing())
-                                            selfParticipant[Internal.sInternal].setMediaSourceId(event);
-                                        activeModalities.audio = true;
-                                        audioState(Internal.Modality.State.Connected);
-                                        break;
-                                    case 'deleted':
-                                        activeModalities.audio = false;
-                                        audioState(Internal.Modality.State.Disconnected);
-                                        break;
-                                    default:
-                                        assert(false, 'unexpected event type');
-                                }
-                            }
-                            else if (scope.rel == 'participant') {
-                                Task.wait(getParticipant(scope.href)).then(function (participant) {
-                                    switch (event.type) {
-                                        case 'added':
-                                        case 'updated':
-                                            if (isConferencing()) {
-                                                participant[Internal.sInternal].setMediaSourceId(event);
-                                                // In conference mode, the indication of a remote
-                                                // participant hold/resume or mute/unmute is
-                                                // "participantAudio updated" event. We need to
-                                                // reload "participantAudio" resource and set the
-                                                // properties accordingly
-                                                if (event.type == 'updated') {
-                                                    ucwa.send('GET', event.target.href).then(function (r) {
-                                                        if (r.has('audioDirection')) {
-                                                            participant[Internal.sInternal].audioOnHold(r.get('audioDirection') ==
-                                                                AudioVideoDirection.Inactive);
-                                                        }
-                                                        if (r.has('audioMuted'))
-                                                            participant[Internal.sInternal].audioMuted(r.get('audioMuted'));
-                                                    });
-                                                }
-                                            }
-                                            participant[Internal.sInternal].audioState(Internal.Modality.State.Connected);
-                                            break;
-                                        case 'deleted':
-                                            participant[Internal.sInternal].audioState(Internal.Modality.State.Disconnected);
-                                            break;
-                                        default:
-                                            assert(false, 'unexpected event type');
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    // event handler for "participantVideo added/updated/deleted in participant|localParticipant" events
-                    //  - tracks session video state (on/off), participant video state and shows/removes video
-                    //    when video modality is activated/deactivated.
-                    function onParticipantVideo(status, resource, event) {
-                        var scope = event['in'];
-                        if (event.sender.href == rConversation.href && scope) {
-                            if (scope.rel == 'localParticipant') {
-                                switch (event.type) {
-                                    case 'added':
-                                    case 'updated':
-                                        activeModalities.video = true;
-                                        if (isConferencing()) {
-                                            selfParticipant[Internal.sInternal].setMediaSourceId(event);
-                                            updateMediaRoster(selfParticipant, isInMediaRoster(selfParticipant) ? 'update' : 'add');
-                                            // check participants that are already in the conference - we need their msis
-                                            // because we won't receive "participantVideo added" events for them.
-                                            participants.each(function (p) {
-                                                if (!isInMediaRoster(p) && p[Internal.sInternal].audioSourceId() != -1)
-                                                    updateMediaRoster(p, 'add');
-                                            });
-                                        }
-                                        videoState(Internal.Modality.State.Connected);
-                                        selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
-                                        break;
-                                    case 'deleted':
-                                        removeVideo(selfVideoStream, true);
-                                        activeModalities.video = false;
-                                        if (isConferencing()) {
-                                            if (isInMediaRoster(selfParticipant))
-                                                updateMediaRoster(selfParticipant, 'remove');
-                                            selfParticipant[Internal.sInternal].setMediaSourceId(event);
-                                        }
-                                        videoState(Internal.Modality.State.Disconnected);
-                                        selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
-                                        break;
-                                    default:
-                                        assert(false, 'unexpected event type');
-                                }
-                            }
-                            else if (scope.rel == 'participant') {
-                                Task.wait(getParticipant(scope.href)).then(function (participant) {
-                                    switch (event.type) {
-                                        case 'added':
-                                        case 'updated':
-                                            if (isConferencing()) {
-                                                participant[Internal.sInternal].setMediaSourceId(event);
-                                                updateMediaRoster(participant, isInMediaRoster(participant) ? 'update' : 'add');
-                                                participant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
-                                            }
-                                            else {
-                                                participant[Internal.sInternal].setVideoStream(mainVideoStream);
-                                                participant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
-                                            }
-                                            break;
-                                        case 'deleted':
-                                            if (isConferencing()) {
-                                                if (isInMediaRoster(participant))
-                                                    updateMediaRoster(participant, 'remove');
-                                                participant[Internal.sInternal].setMediaSourceId(event);
-                                                removeParticipantVideo(participant);
-                                                participant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
-                                                // if participant video is deleted not because we stopped video
-                                                // subscription explicitly (via isStarted(false)) but because 
-                                                // participant left the AV call then we need to reset isStarted.
-                                                participant[Internal.sInternal].setVideoStarted(false);
-                                            }
-                                            else {
-                                                participant[Internal.sInternal].setVideoStream(null);
-                                                participant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
-                                            }
-                                            break;
-                                        default:
-                                            assert(false, 'unexpected event type');
-                                    }
-                                });
-                            }
-                        }
-                    }
-                    // event handler for 'resumeAudio/resumeAudioVideo added' event
-                    //   - activates the inactive conference session created during escalation
-                    function onResumeAudioVideoAdded(status, resource, event) {
-                        var scope = event['in'], href;
-                        if (scope && scope.rel == 'audioVideoSession' && scope.href in avSessions) {
-                            href = scope.href;
-                            // Currently UCWA returns the 'renegotiations' link of the audioVideoSession as resumeAudio uri,
-                            // i.e. avSessions[event.in.href].resource.link('renegotiations').href == event.target.href,
-                            // but we cache it separately just in case
-                            avSessions[href].resumeAudioVideoUri = event.target.href;
-                            Task.wait(null).then(function () {
-                                if (!avSessions[href].renegotiated) {
-                                    return ucwa.wait({
-                                        type: 'completed',
-                                        target: { rel: 'audioVideoRenegotiation' },
-                                        resource: function (r) {
-                                            // r.get('operationId') in outAvRenegoOpIds;
-                                            return r.get('direction') == 'Outgoing' && r.link('audioVideoSession').href in avSessions;
-                                        }
+                        //#endregion
+                        //#region videoWindow
+                        /**
+                         * Creates a video window and anchors it in the parent DOM element
+                         *
+                         * The whole area of the parent element will be occupied by the video. Video preview window sized to
+                         * 1/3rd of the remote window and is placed in the lower-right corner. Currently, its flicker makes
+                         * the preview unusable
+                         */
+                        function showVideo(vs, isPreview) {
+                            var sink = vs.source.sink;
+                            if (vs._id() && sink.container()) {
+                                // TODO: this is a temporary check to avoid repeated window creation
+                                // when this method is called more than once ('participantVideo updated')
+                                if (sink._state() == PluginComponent.State.Unloaded) {
+                                    return sink._init().then(function () {
+                                        pcAV.invoke('SetVideoWindow', vs._id(), isPreview ? Internal.MediaEnum.MediaDeviceType.PREVIEW : Internal.MediaEnum.MediaDeviceType.RENDER, sink._videoWindow(), sink._format(), 1 /* SmartCrop */);
+                                        sink._s(sink._size.changed(bind(onVideoResized, vs, isPreview)));
                                     });
                                 }
-                            }).then(function () {
-                                resumeAudioVideo();
-                            });
+                            }
                         }
-                    }
-                    function onResumeAudioVideoDeleted(status, resource, event) {
-                        var scope = event['in'];
-                        if (scope && scope.rel == 'audioVideoSession' && scope.href in avSessions &&
-                            event.target.href == avSessions[scope.href].resumeAudioVideoUri) {
-                            delete avSessions[scope.href].resumeAudioVideoUri;
+                        /**
+                         * Removes the video window from the parent DOM element
+                         */
+                        function removeVideo(vs, isPreview) {
+                            var sink = vs.source.sink;
+                            if (vs._id() && sink._videoWindow()) {
+                                pcAV.invoke('RemoveVideoWindow', vs._id(), isPreview ? Internal.MediaEnum.MediaDeviceType.PREVIEW : Internal.MediaEnum.MediaDeviceType.RENDER, sink._videoWindow());
+                                sink._uninit();
+                                if (sink._s())
+                                    sink._s().dispose();
+                            }
                         }
-                    }
-                    //#endregion server events
-                    //#region plugin events
-                    function onPluginComponentEvent(event) {
-                        var handler = pluginEventHandlers[event.type];
-                        if (handler) {
-                            // debugger; // this is to let debug the handler of the event
-                            handler.apply(null, event.args);
+                        /**
+                         * Video 'resized' event handler
+                         */
+                        function onVideoResized(vs, isPreview, size) {
+                            // notify the AVComponent that the video window size has changed
+                            pcAV.invoke('SetVideoWindowSize', vs._id(), vs.source.sink._videoWindow(), isPreview, size.width, size.height);
                         }
-                    }
-                    var pluginEventHandlers = {
-                        'CHANNEL_CREATED': function (channelType, channelId, isMain) {
-                            switch (channelType) {
-                                case 1 /* AUDIO */:
-                                    audioChannel = { channelType: channelType, channelId: channelId };
-                                    break;
-                                case 2 /* VIDEO */:
-                                    if (isMain) {
-                                        mainVideoStream._id(channelId);
-                                        selfVideoStream._id(channelId);
+                        //#endregion videoWindow
+                        //#region server events
+                        function onServerEvent(event) {
+                            var id = event.target.rel + ' ' + event.type;
+                            var handler = ucwaEventHandlers[id];
+                            if (handler) {
+                                // debugger; // this is to let debug the handler of the event
+                                handler(event.status, event.resource, event);
+                            }
+                        }
+                        var ucwaEventHandlers = {
+                            // this is the first event received in any AV call setup (except calling an invalid SIP uri,
+                            // in which case UCWA sends the 'audioVideoInvitation completed' event only).
+                            'audioVideoInvitation started': function (status, resource) {
+                                // set the invitation resource for the outgoing AV session (for the incoming call
+                                // audioVideoSession is initialized with the received invitation resource)
+                                if (resource.get('direction') == 'Outgoing' &&
+                                    resource.get('sessionContext') == sessionContext) {
+                                    // if the user canceled the call before we received this event terminate the call
+                                    // on the server and unload the AV component.
+                                    if (state() == Internal.Modality.State.Disconnected) {
+                                        if (resource.hasLink('cancel'))
+                                            ucwa.send('POST', resource.link('cancel').href, { nobatch: true });
+                                        cleanup();
                                     }
                                     else {
-                                        assert(isConferencing());
-                                        videoStreams.add(new Internal.MediaStream({
-                                            mediaPlugin: mediaPlugin,
-                                            type: Internal.MediaEnum.StreamType.Render,
-                                            id: channelId
-                                        }));
-                                        // max number of remote participant video streams in a meeting
-                                        // = max num of plugin channels excluding the main channel
-                                        assert(videoStreams.size() < mediaConfig.maxVideoChannelCount());
-                                        log('Num streams created: ' + videoStreams.size());
+                                        rAVInvitation = resource;
+                                        dfdStart.status('awaiting "audioVideoNegotiation started or completed" event from UCWA');
                                     }
-                                    break;
-                                default:
-                                    log('Created a channel of unknown type ' + channelType);
-                                    // debugger;
-                                    break;
-                            }
-                        },
-                        'CHANNEL_DIRECTION_CHANGED': function (channelType, channelId, direction) {
-                            // wire participant.audio.isOnHold to direction:
-                            //   - MediaEnum.MediaConfig.NO_ACTIVE_MEDIA: hold
-                            //   - otherwise (likely MediaEnum.MediaConfig.BOTH): resume
-                            if (remoteHoldState == RemoteHoldState.HoldCompleted) {
-                                if (direction == 4 /* NO_ACTIVE_MEDIA */ && !isConferencing())
-                                    participants(0)[Internal.sInternal].audioOnHold(true);
-                                remoteHoldState = RemoteHoldState.Unknown;
-                            }
-                            else if (remoteHoldState == RemoteHoldState.ResumeCompleted) {
-                                if (!isConferencing()) {
-                                    // note: direction can be MediaConfig.NO_ACTIVE_MEDIA
-                                    // if local participant is on hold
-                                    participants(0)[Internal.sInternal].audioOnHold(false);
                                 }
-                                remoteHoldState = RemoteHoldState.Unknown;
+                            },
+                            // this event is received if we started an outgoing AV call as the first conversation modality
+                            // using the global startAudioVideo link
+                            'conversation added': function (status, resource) {
+                                if (resource.get('threadId') == threadId)
+                                    rConversation = resource;
+                            },
+                            // this event is received during outgoing P2P AV call setup (early media?)
+                            'audioVideoNegotiation started': function (status, resource, event) {
+                                if (event.sender.href == rAVInvitation.href) {
+                                    setProvisionalAnswer(resource.link('mediaProvisionalAnswer').href, resource.get('remoteEndpoint'));
+                                    dfdStart.status('awaiting "audioVideoNegotiation completed" event from UCWA');
+                                }
+                            },
+                            // this event is received during outgoing P2P or conference call setup.
+                            // If the negotiation completed successfully the event resource contains session context,
+                            // a link to matching audioVideoSession and the remoteEndpoint of that session.
+                            // If the call was declined or not answered we have negotiation href only.
+                            'audioVideoNegotiation completed': function (status, resource, event) {
+                                var href;
+                                if (event.sender.href == rAVInvitation.href) {
+                                    switch (status) {
+                                        case 'Success':
+                                            // "audioVideoNegotiation completed" may arrive before the corresponding
+                                            // "audioVideoSession added" event when the call is forwarded to voice mail.
+                                            // in this case we create an entry in avSessions and expect to fill it out
+                                            // after the session added event arrives.
+                                            href = resource.link('audioVideoSession').href;
+                                            avSessions[href] = avSessions[href] || {};
+                                            avSessions[href].negotiated = true;
+                                            setFinalAnswer(resource.link('mediaAnswer').href, resource.get('remoteEndpoint'));
+                                            dfdStart.status('awaiting "audioVideoInvitation completed" event from UCWA');
+                                            break;
+                                        case 'Failure':
+                                            if (event.reason.subcode != 'Ended' && event.reason.subcode != 'ConnectedElsewhere')
+                                                dfdStart.status(event.reason && event.reason.message);
+                                            break;
+                                    }
+                                }
+                            },
+                            // during an outgoing call the server may set up more than one audioVideoSession, because
+                            // the remote sip uri that we are calling may be signed in on more than one endpoint.
+                            // Also, if the remote party does not accept the call the UCWA server may redirect the
+                            // client to a media server so that the client may leave a voice mail; during this process
+                            // the UCWA server will create another audioVideoSession and delete the original session.
+                            // The next two handlers keep track of audioVideoSessions.
+                            'audioVideoSession added': function (status, resource) {
+                                var href = resource.href;
+                                if (resource.get('sessionContext') == sessionContext) {
+                                    avSessions[href] = avSessions[href] || {};
+                                    avSessions[href].resource = resource;
+                                }
+                            },
+                            'audioVideoSession deleted': function (status, resource, event) {
+                                delete avSessions[event.target.href];
+                                // this event is the only indication of a failed escalation; we need to notify
+                                // AudioVideoModality so it can force the cleanup of this session (technically there
+                                // a "participantInvitation completed" event with code == ServiceFailure and
+                                // subcode == EscalationFailed but it is received by the client that issued the
+                                // invitation only).
+                                if (fEscalation && isEmptyObject(avSessions)) {
+                                    escalated.fire('failure');
+                                    fEscalation = false;
+                                }
+                            },
+                            // this event is received during any AV call setup
+                            'audioVideoInvitation completed': function (status, resource, event) {
+                                // check for rAVInvitation is needed because this event may arrive before we
+                                // even get a response to startAudioVideo post if we call an invalid SIP uri,
+                                // so rAVInvitation may be undefined.
+                                // Note that completion of an outgoing invitation is handled by sendOffer method
+                                if (rAVInvitation && rAVInvitation.href == resource.href &&
+                                    resource.get('direction') == 'Incoming') {
+                                    if (status == 'Success') {
+                                        try {
+                                            // there are no audioVideoNegotiation events in the incoming P2P call setup,
+                                            // so we set negotiated flag for the cached audioVideoSession here
+                                            setNegotiatedSession(resource.get('sessionContext'));
+                                            completeNegotiation(status, event.reason);
+                                            // if AV is added by a remote participant in a 1:1 conversation which already
+                                            // has another modality (messaging) then "participantAudio/Video added" events
+                                            // arrive before "audioVideoInvitation started" event, i.e. before this
+                                            // AudioVideoSession object exists. So we need to set the AV properties of the
+                                            // remote participant here:
+                                            // TODO: check if they were not set before : Accepting the AV invitation that created the call
+                                            assert(!isConferencing());
+                                            var p = participants(0);
+                                            if (p) {
+                                                p[Internal.sInternal].audioState(Internal.Modality.State.Connected);
+                                                if (videoState() == Internal.Modality.State.Connected) {
+                                                    p[Internal.sInternal].setVideoStream(mainVideoStream);
+                                                    p[Internal.sInternal].videoState(Internal.Modality.State.Connected);
+                                                }
+                                            }
+                                            dfdAccept.resolve();
+                                            state(Internal.Modality.State.Connected);
+                                        }
+                                        catch (error) {
+                                            dfdAccept.reject(error);
+                                            state(Internal.Modality.State.Disconnected);
+                                        }
+                                    }
+                                    else {
+                                        // the caller (remote party) hung up while the call setup was not completed.
+                                        if (dfdAccept)
+                                            dfdAccept.reject(event.reason);
+                                        state(Internal.Modality.State.Disconnected, event.reason);
+                                    }
+                                }
+                            },
+                            'audioVideoRenegotiation started': function (status, resource) {
+                                if (resource.link('audioVideoSession').href in avSessions) {
+                                    if (resource.get('direction') == 'Incoming') {
+                                        var sdp = DataUri(resource.link('mediaOffer').href).data;
+                                        if (!isConferencing() && participants.size() > 0) {
+                                            remoteHoldState = isHoldRequest(sdp) ?
+                                                RemoteHoldState.HoldOffered : RemoteHoldState.ResumeOffered;
+                                        }
+                                        setRenegotiationOffer(sdp);
+                                        rAVRenegotiation = resource;
+                                    }
+                                    else if (dfdStart && dfdStart.promise.state() == 'pending') {
+                                        // this is an outgoing renegotiation caused by the second start() call
+                                        // to add video to an audio conversation
+                                        dfdStart.status('Waiting for audioVideoRenegotiation completed event');
+                                    }
+                                }
+                            },
+                            'audioVideoRenegotiation completed': function (status, resource, event) {
+                                var href = resource.link('audioVideoSession').href;
+                                if (href in avSessions) {
+                                    if (resource.get('direction') == 'Outgoing') {
+                                        assert(resource.get('operationId') in outAvRenegoOpIds);
+                                        delete outAvRenegoOpIds[resource.get('operationId')];
+                                        if (status == 'Success') {
+                                            avSessions[href].renegotiated = true;
+                                            setFinalAnswer(resource.link('mediaAnswer').href, avSessions[href].resource.get('remoteEndpoint'));
+                                        }
+                                        completeNegotiation(status, event.reason);
+                                        if (dfdStart && dfdStart.promise.state() == 'pending') {
+                                            // this is an outgoing renegotiation caused by the second start() call
+                                            // to add video to an audio conversation
+                                            if (status == 'Success')
+                                                dfdStart.resolve();
+                                            else
+                                                dfdStart.reject();
+                                        }
+                                    }
+                                    else {
+                                        // the renegotiation may be in response to remote participant hold/resume
+                                        if (!isConferencing()) {
+                                            if (remoteHoldState == RemoteHoldState.HoldAnswered)
+                                                remoteHoldState = RemoteHoldState.HoldCompleted;
+                                            else if (remoteHoldState == RemoteHoldState.ResumeAnswered)
+                                                remoteHoldState = RemoteHoldState.ResumeCompleted;
+                                        }
+                                        completeNegotiation(status, event.reason);
+                                    }
+                                }
+                            },
+                            'audioVideo updated': function (status, resource, event) {
+                                if (rAVInvitation && resource.href == rAVInvitation.link('audioVideo').href) {
+                                    if (resource.get('state') == 'Disconnected') {
+                                        if (rAVInvitation.get('state') == 'Connected') {
+                                            // This is our chance to clean up the established call that is terminated by
+                                            // the remote party. The local party terminates the established call via modality.stop()
+                                            // and hang-ups by either party during call setup are processed by audioVideoInvitation
+                                            // started/completed event handlers.
+                                            cleanup();
+                                            // setting this modality state to disconnected will cause its removal from
+                                            // the conversation
+                                            state(Internal.Modality.State.Disconnected);
+                                        }
+                                    }
+                                    else if (resource.get('state') == 'Connected' &&
+                                        event.reason && event.reason.subcode == 'SessionSwitched' &&
+                                        resource.link('audioVideoSession').href in avSessions) {
+                                        // this is the escalation confirmation, i.e. this AV session replaced the
+                                        // original P2P AV session
+                                        escalated.fire('success');
+                                        fEscalation = false;
+                                    }
+                                }
+                            },
+                            // participantAudio/Video added/deleted events for a localParticipant are used to
+                            // track active modalities of this client
+                            'participantAudio added': onParticipantAudio,
+                            'participantAudio updated': onParticipantAudio,
+                            'participantAudio deleted': onParticipantAudio,
+                            'participantVideo added': onParticipantVideo,
+                            'participantVideo updated': onParticipantVideo,
+                            'participantVideo deleted': onParticipantVideo,
+                            'escalateAudio deleted': function (status, resource, event) {
+                                if (event.target.href == escalateAudioVideoUri)
+                                    escalateAudioVideoUri = null;
+                            },
+                            // these events are fired in the later phase of the escalation when the setup of our inactive AV call
+                            // to a conference is finished and we may activate (resume) it.
+                            'resumeAudio added': onResumeAudioVideoAdded,
+                            'resumeAudioVideo added': onResumeAudioVideoAdded,
+                            'resumeAudio deleted': onResumeAudioVideoDeleted,
+                            'resumeAudioVideo deleted': onResumeAudioVideoDeleted
+                        };
+                        // returns a participant object from a participants collection
+                        function getParticipant(href) {
+                            var participant = find(participants(), function (p) { return p[Internal.sHref] == href; });
+                            if (participant)
+                                return participant;
+                            // shortcut for a 1:1 conversation with a participant added to the conversation beforehand
+                            //
+                            // The check for participant size is needed because if the AV conversation is started not with the
+                            // participant from a person model but using the sip uri as a parameter, we would have to rely on
+                            // "participant added" event for the remote guy to become a member of participants collection.
+                            // If miraculously this event arrives after "participantAudio/Video added" we would have an empty
+                            // participants collection here.
+                            if (!isConferencing() && participants.size() == 1)
+                                return participants(0);
+                            // "participantAudio/Video added" event arrives right after "participant added" event. If the
+                            // participant was added to the conversation's participant collection using its contact href,
+                            // the "participant added" event handler is doing another server lookup to match that contact href
+                            // to the participant href. So we can't find that participant here either and we need to do the
+                            // same lookup.
+                            return ucwa.send('GET', href).then(function (r) {
+                                return getParticipant(r.link('contact').href);
+                            });
+                        }
+                        function isInMediaRoster(participant) {
+                            var p = participant[Internal.sInternal];
+                            return pcAV && p.isInMediaRoster[pcAV.id()];
+                        }
+                        function updateMediaRoster(participant, type) {
+                            try {
+                                var method = type == 'add' ? 'AddParticipantInfo' :
+                                    type == 'remove' ? 'RemoveParticipantInfo' :
+                                        type == 'update' ? 'UpdateParticipantInfo' :
+                                            assert(false);
+                                var p = participant[Internal.sInternal];
+                                // pcAV may not exist yet when when we join the meeting which participants are already on the AV call.
+                                // In this case 'participantVideo added' events for such participants may come before we finish
+                                // joining the meeting so we have not loaded the plugin AVComponent.
+                                pcAV.invoke(method, p.audioSourceId(), p.videoSourceId(), -1);
+                                p.isInMediaRoster[pcAV.id()] = type != 'remove';
+                                return true;
                             }
-                            // CHANNEL_DIRECTION_CHANGED is a good hint for detecting...
-                            if (channelType == 2 /* VIDEO */ &&
-                                selfVideoStream._id() == channelId) {
-                                // ... if self participant is streaming video
-                                switch (direction) {
-                                    case 1 /* SEND */:
-                                    case 3 /* BOTH */:
-                                        selfParticipant[Internal.sInternal].setVideoStarted(true);
-                                        selfVideoStream._isFlowing(true);
+                            catch (err) {
+                                log('Media Roster ERROR: ' + err);
+                                return false;
+                            }
+                        }
+                        // event handler for "participantAudio added/updated/deleted in participant|localParticipant" events
+                        //  - tracks session audio state (on/off) and participant audio state.
+                        function onParticipantAudio(status, resource, event) {
+                            var scope = event['in'];
+                            if (event.sender.href == rConversation.href && scope) {
+                                if (scope.rel == 'localParticipant') {
+                                    switch (event.type) {
+                                        case 'added': // signal for the initial AV session
+                                        case 'updated':
+                                            if (isConferencing())
+                                                selfParticipant[Internal.sInternal].setMediaSourceId(event);
+                                            activeModalities.audio = true;
+                                            audioState(Internal.Modality.State.Connected);
+                                            break;
+                                        case 'deleted':
+                                            activeModalities.audio = false;
+                                            audioState(Internal.Modality.State.Disconnected);
+                                            break;
+                                        default:
+                                            assert(false, 'unexpected event type');
+                                    }
+                                }
+                                else if (scope.rel == 'participant') {
+                                    Task.wait(getParticipant(scope.href)).then(function (participant) {
+                                        switch (event.type) {
+                                            case 'added':
+                                            case 'updated':
+                                                if (isConferencing()) {
+                                                    participant[Internal.sInternal].setMediaSourceId(event);
+                                                    // In conference mode, the indication of a remote
+                                                    // participant hold/resume or mute/unmute is
+                                                    // "participantAudio updated" event. We need to
+                                                    // reload "participantAudio" resource and set the
+                                                    // properties accordingly
+                                                    if (event.type == 'updated') {
+                                                        ucwa.send('GET', event.target.href).then(function (r) {
+                                                            if (r.has('audioDirection')) {
+                                                                participant[Internal.sInternal].audioOnHold(r.get('audioDirection') ==
+                                                                    AudioVideoDirection.Inactive);
+                                                            }
+                                                            if (r.has('audioMuted'))
+                                                                participant[Internal.sInternal].audioMuted(r.get('audioMuted'));
+                                                        });
+                                                    }
+                                                }
+                                                participant[Internal.sInternal].audioState(Internal.Modality.State.Connected);
+                                                break;
+                                            case 'deleted':
+                                                participant[Internal.sInternal].audioState(Internal.Modality.State.Disconnected);
+                                                break;
+                                            default:
+                                                assert(false, 'unexpected event type');
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        // event handler for "participantVideo added/updated/deleted in participant|localParticipant" events
+                        //  - tracks session video state (on/off), participant video state and shows/removes video
+                        //    when video modality is activated/deactivated.
+                        function onParticipantVideo(status, resource, event) {
+                            var scope = event['in'];
+                            if (event.sender.href == rConversation.href && scope) {
+                                if (scope.rel == 'localParticipant') {
+                                    switch (event.type) {
+                                        case 'added':
+                                        case 'updated':
+                                            activeModalities.video = true;
+                                            if (isConferencing()) {
+                                                selfParticipant[Internal.sInternal].setMediaSourceId(event);
+                                                updateMediaRoster(selfParticipant, isInMediaRoster(selfParticipant) ? 'update' : 'add');
+                                                // check participants that are already in the conference - we need their msis
+                                                // because we won't receive "participantVideo added" events for them.
+                                                participants.each(function (p) {
+                                                    if (!isInMediaRoster(p) && p[Internal.sInternal].audioSourceId() != -1)
+                                                        updateMediaRoster(p, 'add');
+                                                });
+                                            }
+                                            videoState(Internal.Modality.State.Connected);
+                                            selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
+                                            break;
+                                        case 'deleted':
+                                            removeVideo(selfVideoStream, true);
+                                            activeModalities.video = false;
+                                            if (isConferencing()) {
+                                                if (isInMediaRoster(selfParticipant))
+                                                    updateMediaRoster(selfParticipant, 'remove');
+                                                selfParticipant[Internal.sInternal].setMediaSourceId(event);
+                                            }
+                                            videoState(Internal.Modality.State.Disconnected);
+                                            selfParticipant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
+                                            break;
+                                        default:
+                                            assert(false, 'unexpected event type');
+                                    }
+                                }
+                                else if (scope.rel == 'participant') {
+                                    Task.wait(getParticipant(scope.href)).then(function (participant) {
+                                        switch (event.type) {
+                                            case 'added':
+                                            case 'updated':
+                                                if (isConferencing()) {
+                                                    participant[Internal.sInternal].setMediaSourceId(event);
+                                                    updateMediaRoster(participant, isInMediaRoster(participant) ? 'update' : 'add');
+                                                    participant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
+                                                }
+                                                else {
+                                                    participant[Internal.sInternal].setVideoStream(mainVideoStream);
+                                                    participant[Internal.sInternal].videoState(Internal.Modality.State.Connected);
+                                                }
+                                                break;
+                                            case 'deleted':
+                                                if (isConferencing()) {
+                                                    if (isInMediaRoster(participant))
+                                                        updateMediaRoster(participant, 'remove');
+                                                    participant[Internal.sInternal].setMediaSourceId(event);
+                                                    removeParticipantVideo(participant);
+                                                    participant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
+                                                    // if participant video is deleted not because we stopped video
+                                                    // subscription explicitly (via isStarted(false)) but because 
+                                                    // participant left the AV call then we need to reset isStarted.
+                                                    participant[Internal.sInternal].setVideoStarted(false);
+                                                }
+                                                else {
+                                                    participant[Internal.sInternal].setVideoStream(null);
+                                                    participant[Internal.sInternal].videoState(Internal.Modality.State.Disconnected);
+                                                }
+                                                break;
+                                            default:
+                                                assert(false, 'unexpected event type');
+                                        }
+                                    });
+                                }
+                            }
+                        }
+                        // event handler for 'resumeAudio/resumeAudioVideo added' event
+                        //   - activates the inactive conference session created during escalation
+                        function onResumeAudioVideoAdded(status, resource, event) {
+                            var scope = event['in'], href;
+                            if (scope && scope.rel == 'audioVideoSession' && scope.href in avSessions) {
+                                href = scope.href;
+                                // Currently UCWA returns the 'renegotiations' link of the audioVideoSession as resumeAudio uri,
+                                // i.e. avSessions[event.in.href].resource.link('renegotiations').href == event.target.href,
+                                // but we cache it separately just in case
+                                avSessions[href].resumeAudioVideoUri = event.target.href;
+                                Task.wait(null).then(function () {
+                                    if (!avSessions[href].renegotiated) {
+                                        return ucwa.wait({
+                                            type: 'completed',
+                                            target: { rel: 'audioVideoRenegotiation' },
+                                            resource: function (r) {
+                                                // r.get('operationId') in outAvRenegoOpIds;
+                                                return r.get('direction') == 'Outgoing' && r.link('audioVideoSession').href in avSessions;
+                                            }
+                                        });
+                                    }
+                                }).then(function () {
+                                    resumeAudioVideo();
+                                });
+                            }
+                        }
+                        function onResumeAudioVideoDeleted(status, resource, event) {
+                            var scope = event['in'];
+                            if (scope && scope.rel == 'audioVideoSession' && scope.href in avSessions &&
+                                event.target.href == avSessions[scope.href].resumeAudioVideoUri) {
+                                delete avSessions[scope.href].resumeAudioVideoUri;
+                            }
+                        }
+                        //#endregion server events
+                        //#region plugin events
+                        function onPluginComponentEvent(event) {
+                            var handler = pluginEventHandlers[event.type];
+                            if (handler) {
+                                // debugger; // this is to let debug the handler of the event
+                                handler.apply(null, event.args);
+                            }
+                        }
+                        var pluginEventHandlers = {
+                            'CHANNEL_CREATED': function (channelType, channelId, isMain) {
+                                switch (channelType) {
+                                    case 1 /* AUDIO */:
+                                        audioChannel = { channelType: channelType, channelId: channelId };
                                         break;
-                                    case 2 /* RECEIVE */:
-                                        selfParticipant[Internal.sInternal].setVideoStarted(false);
-                                        selfVideoStream._isFlowing(false);
+                                    case 2 /* VIDEO */:
+                                        if (isMain) {
+                                            mainVideoStream._id(channelId);
+                                            selfVideoStream._id(channelId);
+                                        }
+                                        else {
+                                            assert(isConferencing());
+                                            videoStreams.add(new Internal.MediaStream({
+                                                mediaPlugin: mediaPlugin,
+                                                type: Internal.MediaEnum.StreamType.Render,
+                                                id: channelId
+                                            }));
+                                            // max number of remote participant video streams in a meeting
+                                            // = max num of plugin channels excluding the main channel
+                                            assert(videoStreams.size() < mediaConfig.maxVideoChannelCount());
+                                            log('Num streams created: ' + videoStreams.size());
+                                        }
+                                        break;
+                                    default:
+                                        log('Created a channel of unknown type ' + channelType);
+                                        // debugger;
                                         break;
                                 }
-                                // ... and if remote participant in a 1:1 conversation is streaming video
-                                if (!isConferencing()) {
-                                    assert(mainVideoStream._id() == channelId);
+                            },
+                            'CHANNEL_DIRECTION_CHANGED': function (channelType, channelId, direction) {
+                                // wire participant.audio.isOnHold to direction:
+                                //   - MediaEnum.MediaConfig.NO_ACTIVE_MEDIA: hold
+                                //   - otherwise (likely MediaEnum.MediaConfig.BOTH): resume
+                                if (remoteHoldState == RemoteHoldState.HoldCompleted) {
+                                    if (direction == 4 /* NO_ACTIVE_MEDIA */ && !isConferencing())
+                                        participants(0)[Internal.sInternal].audioOnHold(true);
+                                    remoteHoldState = RemoteHoldState.Unknown;
+                                }
+                                else if (remoteHoldState == RemoteHoldState.ResumeCompleted) {
+                                    if (!isConferencing()) {
+                                        // note: direction can be MediaConfig.NO_ACTIVE_MEDIA
+                                        // if local participant is on hold
+                                        participants(0)[Internal.sInternal].audioOnHold(false);
+                                    }
+                                    remoteHoldState = RemoteHoldState.Unknown;
+                                }
+                                // CHANNEL_DIRECTION_CHANGED is a good hint for detecting...
+                                if (channelType == 2 /* VIDEO */ &&
+                                    selfVideoStream._id() == channelId) {
+                                    // ... if self participant is streaming video
                                     switch (direction) {
                                         case 1 /* SEND */:
-                                            participants(0)[Internal.sInternal].setVideoStarted(false);
-                                            mainVideoStream._isFlowing(false);
+                                        case 3 /* BOTH */:
+                                            selfParticipant[Internal.sInternal].setVideoStarted(true);
+                                            selfVideoStream._isFlowing(true);
                                             break;
                                         case 2 /* RECEIVE */:
-                                        case 3 /* BOTH */:
-                                            participants(0)[Internal.sInternal].setVideoStarted(true);
-                                            mainVideoStream._isFlowing(true);
+                                            selfParticipant[Internal.sInternal].setVideoStarted(false);
+                                            selfVideoStream._isFlowing(false);
                                             break;
                                     }
+                                    // ... and if remote participant in a 1:1 conversation is streaming video
+                                    if (!isConferencing()) {
+                                        assert(mainVideoStream._id() == channelId);
+                                        switch (direction) {
+                                            case 1 /* SEND */:
+                                                participants(0)[Internal.sInternal].setVideoStarted(false);
+                                                mainVideoStream._isFlowing(false);
+                                                break;
+                                            case 2 /* RECEIVE */:
+                                            case 3 /* BOTH */:
+                                                participants(0)[Internal.sInternal].setVideoStarted(true);
+                                                mainVideoStream._isFlowing(true);
+                                                break;
+                                        }
+                                    }
                                 }
-                            }
-                        },
-                        'MEDIA_CHANGED': function (channelType, channelId, direction, mediaEvent) {
-                            var streamState;
-                            if (channelType == 2 /* VIDEO */) {
-                                streamState = enumcastStreamState(mediaEvent);
-                                if (mainVideoStream._id() == channelId && direction == 2 /* RENDER */)
-                                    mainVideoStream._state(streamState);
-                                else if (selfVideoStream._id() == channelId && direction == 1 /* CAPTURE */)
-                                    selfVideoStream._state(streamState);
-                                else {
-                                    videoStreams.each(function (vs) {
-                                        if (vs._id() == channelId)
-                                            vs._state(streamState);
+                            },
+                            'MEDIA_CHANGED': function (channelType, channelId, direction, mediaEvent) {
+                                var streamState;
+                                if (channelType == 2 /* VIDEO */) {
+                                    streamState = enumcastStreamState(mediaEvent);
+                                    if (mainVideoStream._id() == channelId && direction == 2 /* RENDER */)
+                                        mainVideoStream._state(streamState);
+                                    else if (selfVideoStream._id() == channelId && direction == 1 /* CAPTURE */)
+                                        selfVideoStream._state(streamState);
+                                    else {
+                                        videoStreams.each(function (vs) {
+                                            if (vs._id() == channelId)
+                                                vs._state(streamState);
+                                        });
+                                    }
+                                }
+                            },
+                            // yes, it's not a typo but a plugin bug
+                            'DOMINANT_SPEKAER_CHANGED': function () {
+                                // arguments - num of speakers, msi0, msi1, ... 
+                                //   the most recent speaker is the first in the list; 
+                                //   if msi0 == -1, nobody is speaking
+                                var msi = arguments[1], cur, prev = recentActiveSpeakers[activeSourceId];
+                                if (prev)
+                                    prev[Internal.sInternal].isSpeaking(false);
+                                if (msi == -1) {
+                                    activeSourceId = msi;
+                                    return;
+                                }
+                                cur = recentActiveSpeakers[msi];
+                                if (!cur) {
+                                    // we have a new speaker who has not talked before
+                                    if (selfParticipant[Internal.sInternal].audioSourceId() == msi) {
+                                        cur = selfParticipant;
+                                    }
+                                    else {
+                                        participants.each(function (p) {
+                                            if (p[Internal.sInternal].audioSourceId() == msi)
+                                                cur = p;
+                                        });
+                                    }
+                                    if (cur)
+                                        recentActiveSpeakers[msi] = cur;
+                                }
+                                if (cur) {
+                                    cur[Internal.sInternal].isSpeaking(true);
+                                    activeSourceId = msi;
+                                }
+                            },
+                            'OFFER_READY': function (hasOffer, diagCode, sdpCount) {
+                                var i, offers = [], renegoHref;
+                                try {
+                                    for (i = 0; i < sdpCount; i++) {
+                                        offers.push({
+                                            sdp: arguments[3 + i * 2],
+                                            id: arguments[3 + i * 2 + 1]
+                                        });
+                                    }
+                                    if (offers.length == 0)
+                                        throw Exception('NoSdpOffers', { diagCode: diagCode });
+                                    renegoHref = getRenegotiationsHref();
+                                    if (renegoHref) {
+                                        // A negotiated AudioVideoSession already exists, the client starts renegotiation -
+                                        // expect an "audioVideoRenegotiation completed" event from UCWA after
+                                        // sending renegotiation offer
+                                        sendRenegotiationOffer(offers[0].sdp, renegoHref);
+                                    }
+                                    else {
+                                        // The client starts AV session - expect an "audioVideoInvitation completed"
+                                        // event from UCWA after sending the invitation
+                                        sendOffer(offers).then(function () {
+                                            dfdStart.resolve();
+                                            state(Internal.Modality.State.Connected);
+                                        }, function (error) {
+                                            // if the caller hangs up by canceling this promise explicitly we wind up
+                                            // here with the rejected promise
+                                            if (dfdStart.promise.state() == 'pending')
+                                                dfdStart.reject(error);
+                                            state(Internal.Modality.State.Disconnected, error);
+                                            audioState(Internal.Modality.State.Disconnected);
+                                            videoState(Internal.Modality.State.Disconnected);
+                                            cleanup();
+                                        }, dfdStart.status);
+                                    }
+                                }
+                                catch (error) {
+                                    if (dfdStart)
+                                        dfdStart.reject(error);
+                                }
+                            },
+                            'ANSWER_READY': function (_arg0, sdp) {
+                                log('SDP Answer:\n' + sdp);
+                                if (rAVRenegotiation) {
+                                    if (!isConferencing()) {
+                                        if (remoteHoldState == RemoteHoldState.HoldOffered)
+                                            remoteHoldState = RemoteHoldState.HoldAnswered;
+                                        else if (remoteHoldState == RemoteHoldState.ResumeOffered)
+                                            remoteHoldState = RemoteHoldState.ResumeAnswered;
+                                    }
+                                    // the client answers the incoming renegotiation request
+                                    // expect an "audioVideoRenegotiation completed" after this call
+                                    ucwa.send('POST', rAVRenegotiation.link('answer').href, {
+                                        headers: { 'Content-Type': 'application/sdp' },
+                                        data: sdp,
+                                        nobatch: true
                                     });
                                 }
-                            }
-                        },
-                        // yes, it's not a typo but a plugin bug
-                        'DOMINANT_SPEKAER_CHANGED': function () {
-                            // arguments - num of speakers, msi0, msi1, ... 
-                            //   the most recent speaker is the first in the list; 
-                            //   if msi0 == -1, nobody is speaking
-                            var msi = arguments[1], cur, prev = recentActiveSpeakers[activeSourceId];
-                            if (prev)
-                                prev[Internal.sInternal].isSpeaking(false);
-                            if (msi == -1) {
-                                activeSourceId = msi;
-                                return;
-                            }
-                            cur = recentActiveSpeakers[msi];
-                            if (!cur) {
-                                // we have a new speaker who has not talked before
-                                if (selfParticipant[Internal.sInternal].audioSourceId() == msi) {
-                                    cur = selfParticipant;
-                                }
                                 else {
-                                    participants.each(function (p) {
-                                        if (p[Internal.sInternal].audioSourceId() == msi)
-                                            cur = p;
-                                    });
-                                }
-                                if (cur)
-                                    recentActiveSpeakers[msi] = cur;
-                            }
-                            if (cur) {
-                                cur[Internal.sInternal].isSpeaking(true);
-                                activeSourceId = msi;
-                            }
-                        },
-                        'OFFER_READY': function (hasOffer, diagCode, sdpCount) {
-                            var i, offers = [], renegoHref;
-                            try {
-                                for (i = 0; i < sdpCount; i++) {
-                                    offers.push({
-                                        sdp: arguments[3 + i * 2],
-                                        id: arguments[3 + i * 2 + 1]
-                                    });
-                                }
-                                if (offers.length == 0)
-                                    throw Exception('NoSdpOffers', { diagCode: diagCode });
-                                renegoHref = getRenegotiationsHref();
-                                if (renegoHref) {
-                                    // A negotiated AudioVideoSession already exists, the client starts renegotiation -
-                                    // expect an "audioVideoRenegotiation completed" event from UCWA after
-                                    // sending renegotiation offer
-                                    sendRenegotiationOffer(offers[0].sdp, renegoHref);
-                                }
-                                else {
-                                    // The client starts AV session - expect an "audioVideoInvitation completed"
-                                    // event from UCWA after sending the invitation
-                                    sendOffer(offers).then(function () {
-                                        dfdStart.resolve();
-                                        state(Internal.Modality.State.Connected);
+                                    // the client answers the incoming invitation
+                                    dfdAccept.status('sending answer to UCWA');
+                                    invitation.acceptWithAnswer(sdp, sessionContext).then(function () {
+                                        dfdAccept.status('awaiting an "audioVideoInvitation completed" event from UCWA');
                                     }, function (error) {
-                                        // if the caller hangs up by canceling this promise explicitly we wind up
-                                        // here with the rejected promise
-                                        if (dfdStart.promise.state() == 'pending')
-                                            dfdStart.reject(error);
+                                        dfdAccept.reject(error);
                                         state(Internal.Modality.State.Disconnected, error);
                                         audioState(Internal.Modality.State.Disconnected);
                                         videoState(Internal.Modality.State.Disconnected);
-                                        cleanup();
-                                    }, dfdStart.status);
+                                    }, dfdAccept.status);
                                 }
                             }
-                            catch (error) {
-                                if (dfdStart)
-                                    dfdStart.reject(error);
-                            }
-                        },
-                        'ANSWER_READY': function (_arg0, sdp) {
-                            log('SDP Answer:\n' + sdp);
-                            if (rAVRenegotiation) {
-                                if (!isConferencing()) {
-                                    if (remoteHoldState == RemoteHoldState.HoldOffered)
-                                        remoteHoldState = RemoteHoldState.HoldAnswered;
-                                    else if (remoteHoldState == RemoteHoldState.ResumeOffered)
-                                        remoteHoldState = RemoteHoldState.ResumeAnswered;
-                                }
-                                // the client answers the incoming renegotiation request
-                                // expect an "audioVideoRenegotiation completed" after this call
-                                ucwa.send('POST', rAVRenegotiation.link('answer').href, {
-                                    headers: { 'Content-Type': 'application/sdp' },
-                                    data: sdp,
-                                    nobatch: true
-                                });
-                            }
-                            else {
-                                // the client answers the incoming invitation
-                                dfdAccept.status('sending answer to UCWA');
-                                invitation.acceptWithAnswer(sdp, sessionContext).then(function () {
-                                    dfdAccept.status('awaiting an "audioVideoInvitation completed" event from UCWA');
-                                }, function (error) {
-                                    dfdAccept.reject(error);
-                                    state(Internal.Modality.State.Disconnected, error);
-                                    audioState(Internal.Modality.State.Disconnected);
-                                    videoState(Internal.Modality.State.Disconnected);
-                                }, dfdAccept.status);
-                            }
-                        }
-                    };
-                    //#endregion plugin events
-                    //#region sendOffer
-                    /**
-                    * Composes an SDP offer from the OFFER_READY media plugin event data and
-                    * sends it to the server to start an AV session.
-                    *
-                    * The returned promise is resolved only when we get a reply to the post and
-                    * and audioVideoInvitation completed event
-                    */
-                    function sendOffer(offers) {
-                        assert(offers.length > 0);
-                        // construct content that contains all offers given by the media plugin
-                        function createOfferOptions(context) {
-                            var boundary = '9BCE36B8-2C70-44CA-AAA6-D3D332ADBD3F', mediaOffer, options = { nobatch: true };
-                            if (isConferencing()) {
-                                if (escalateAudioVideoUri) {
-                                    mediaOffer = Internal.multipartSDP(offers, boundary);
-                                    options = {
-                                        headers: {
-                                            'Content-Type': 'multipart/alternative;boundary=' + boundary +
-                                                ';type="application/sdp"',
-                                            'Content-Length': '' + mediaOffer.length
-                                        },
-                                        query: {
+                        };
+                        //#endregion plugin events
+                        //#region sendOffer
+                        /**
+                        * Composes an SDP offer from the OFFER_READY media plugin event data and
+                        * sends it to the server to start an AV session.
+                        *
+                        * The returned promise is resolved only when we get a reply to the post and
+                        * and audioVideoInvitation completed event
+                        */
+                        function sendOffer(offers) {
+                            assert(offers.length > 0);
+                            // construct content that contains all offers given by the media plugin
+                            function createOfferOptions(context) {
+                                var boundary = '9BCE36B8-2C70-44CA-AAA6-D3D332ADBD3F', mediaOffer, options = { nobatch: true };
+                                if (isConferencing()) {
+                                    if (escalateAudioVideoUri) {
+                                        mediaOffer = Internal.multipartSDP(offers, boundary);
+                                        options = {
+                                            headers: {
+                                                'Content-Type': 'multipart/alternative;boundary=' + boundary +
+                                                    ';type="application/sdp"',
+                                                'Content-Length': '' + mediaOffer.length
+                                            },
+                                            query: {
+                                                operationId: operationId,
+                                                sessionContext: sessionContext
+                                            },
+                                            data: mediaOffer,
+                                            nobatch: true
+                                        };
+                                    }
+                                    else {
+                                        options.data = Internal.multipartJsonAndSDP({
+                                            offers: offers,
+                                            boundary: boundary,
                                             operationId: operationId,
-                                            sessionContext: sessionContext
-                                        },
-                                        data: mediaOffer,
-                                        nobatch: true
-                                    };
+                                            sessionContext: sessionContext,
+                                            threadId: threadId,
+                                            context: context
+                                        });
+                                        options.headers = {
+                                            'Content-Type': 'multipart/related;boundary=' + boundary +
+                                                ';type="application/vnd.microsoft.com.ucwa+json"'
+                                        };
+                                    }
                                 }
                                 else {
+                                    // P2P mode
                                     options.data = Internal.multipartJsonAndSDP({
+                                        to: remoteUri,
                                         offers: offers,
                                         boundary: boundary,
                                         operationId: operationId,
@@ -16298,193 +16297,178 @@ var Skype;
                                             ';type="application/vnd.microsoft.com.ucwa+json"'
                                     };
                                 }
+                                if (context)
+                                    extend(options.headers, { 'X-MS-RequiresMinResourceVersion': 2 });
+                                return options;
                             }
-                            else {
-                                // P2P mode
-                                options.data = Internal.multipartJsonAndSDP({
-                                    to: remoteUri,
-                                    offers: offers,
-                                    boundary: boundary,
-                                    operationId: operationId,
-                                    sessionContext: sessionContext,
-                                    threadId: threadId,
-                                    context: context
+                            return async(getStartAudioVideoLink).call(null).then(function (link) {
+                                var options = createOfferOptions(link.revision >= 2 && invitationContext), dfdPost, dfdCompleted;
+                                dfdPost = ucwa.send('POST', link.href, options).then(function (r) {
+                                    // POST to startAudioVideo/addAudioVideo returns an empty response with an AV invitation
+                                    // URI in the Location header. The UCWA stack constructs and returns an empty resource
+                                    // with href set to that URI.
+                                    if (!rAVInvitation)
+                                        rAVInvitation = r;
                                 });
-                                options.headers = {
-                                    'Content-Type': 'multipart/related;boundary=' + boundary +
-                                        ';type="application/vnd.microsoft.com.ucwa+json"'
-                                };
-                            }
-                            if (context)
-                                extend(options.headers, { 'X-MS-RequiresMinResourceVersion': 2 });
-                            return options;
-                        }
-                        return async(getStartAudioVideoLink).call(null).then(function (link) {
-                            var options = createOfferOptions(link.revision >= 2 && invitationContext), dfdPost, dfdCompleted;
-                            dfdPost = ucwa.send('POST', link.href, options).then(function (r) {
-                                // POST to startAudioVideo/addAudioVideo returns an empty response with an AV invitation
-                                // URI in the Location header. The UCWA stack constructs and returns an empty resource
-                                // with href set to that URI.
-                                if (!rAVInvitation)
-                                    rAVInvitation = r;
-                            });
-                            // wait for the "audioVideoInvitation completed" event that corresponds to the given conversation
-                            dfdCompleted = ucwa.wait({
-                                type: 'completed',
-                                target: { rel: 'audioVideoInvitation' },
-                                resource: { direction: 'Outgoing', threadId: threadId, operationId: operationId, sessionContext: sessionContext }
-                            }).then(function (event) {
-                                if (event.status == 'Failure') {
-                                    // if remote SIP uri is invalid we won't receive "audioVideoInvitation started" event,
-                                    // thus we won't have a full rAVInvitation resource cached. It will be either undefined or
-                                    // just an empty resource with an href returned by a response to startAudioVideo POST (if
-                                    // that response arrived before this event). So we cache the invitation resource here,
-                                    // since it may be used by other event handlers.
-                                    rAVInvitation = event.resource;
-                                    // Technically we may need to complete the negotiation if it was started (i.e. if the call
-                                    // reached the remote party and was declined).
+                                // wait for the "audioVideoInvitation completed" event that corresponds to the given conversation
+                                dfdCompleted = ucwa.wait({
+                                    type: 'completed',
+                                    target: { rel: 'audioVideoInvitation' },
+                                    resource: { direction: 'Outgoing', threadId: threadId, operationId: operationId, sessionContext: sessionContext }
+                                }).then(function (event) {
+                                    if (event.status == 'Failure') {
+                                        // if remote SIP uri is invalid we won't receive "audioVideoInvitation started" event,
+                                        // thus we won't have a full rAVInvitation resource cached. It will be either undefined or
+                                        // just an empty resource with an href returned by a response to startAudioVideo POST (if
+                                        // that response arrived before this event). So we cache the invitation resource here,
+                                        // since it may be used by other event handlers.
+                                        rAVInvitation = event.resource;
+                                        // Technically we may need to complete the negotiation if it was started (i.e. if the call
+                                        // reached the remote party and was declined).
+                                        completeNegotiation(event.status, event.reason);
+                                        throw Internal.EInvitationFailed(event.reason);
+                                    }
                                     completeNegotiation(event.status, event.reason);
-                                    throw Internal.EInvitationFailed(event.reason);
-                                }
-                                completeNegotiation(event.status, event.reason);
+                                });
+                                return Task.waitAll([dfdPost, dfdCompleted]);
                             });
-                            return Task.waitAll([dfdPost, dfdCompleted]);
-                        });
-                    }
-                    //#endregion
-                    //#region sendRenegotiationOffer
-                    /**
-                     * Composes an SDP offer from the OFFER_READY media plugin event data and
-                     * sends it to the server to renegotiate the AV session.
-                     */
-                    function sendRenegotiationOffer(sdp, url) {
-                        log('Renegotiation SDP offer:\n', sdp);
-                        // cache operation id
-                        var operationId = guid();
-                        outAvRenegoOpIds[operationId] = "";
-                        return ucwa.send('POST', url, {
-                            headers: { 'Content-Type': 'application/sdp' },
-                            query: { operationId: operationId },
-                            data: sdp,
-                            nobatch: true
-                        });
-                    }
-                    //#endregion
-                    //#region setOffer
-                    /**
-                     * Invokes pcAV.invoke("SetOffer", ...) with the given set of SDPs,
-                     * e.g. pcAV.invoke("SetOffer", false, 2, sdp1, id1, sdp2, id2).
-                     *
-                     * @param {Object[]} offers
-                     * @returns Whatever pcAV returns.
-                     */
-                    function setOffer(offers) {
-                        assert(offers.length >= 0);
-                        var i, offer, args = ['SetOffer', false, offers.length];
-                        for (i = 0; i < offers.length; i++) {
-                            offer = offers[i];
-                            assert('sdp' in offer);
-                            assert('id' in offer);
-                            args.push(offer.sdp);
-                            args.push(offer.id);
                         }
-                        return pcAV.invoke.apply(pcAV, args);
-                    }
-                    //#endregion
-                    //#region resumeAudioVideo
-                    /**
-                     * Activates (resumes) the AV conference call created in inactive state
-                     * when a p2p call is escalated to a conference.
-                     */
-                    function resumeAudioVideo() {
-                        var audioConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
-                        mainVideoConfig = activeModalities.video ?
-                            (onHold() ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */) :
-                            0 /* NOT_PRESENT */;
-                        var moreChannels = mainVideoConfig != 0 /* NOT_PRESENT */;
-                        pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
-                        mainVideoConfig, // main video configuration
-                        moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
-                        moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
-                        0 /* NOT_PRESENT */); // panoVideoConfig
-                    }
-                    //#endregion
-                    //#region setRenegotiationOffer
-                    function setRenegotiationOffer(sdp) {
-                        // LWA uses the empty string as the Content-ID for the SDP in the case of renegotiation
-                        var id = '';
-                        var audioConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ :
-                            3 /* BOTH */;
-                        // When the remote participant adds video to an audio conversation, we auto-accept incoming
-                        // video only. The local participant can turn their video on later via video.channels(0).isStarted(true).
-                        var videoConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ :
-                            videoState() != Internal.Modality.State.Connected && /\bm=video\b/gmi.test(sdp) ? 2 /* RECEIVE */ :
+                        //#endregion
+                        //#region sendRenegotiationOffer
+                        /**
+                         * Composes an SDP offer from the OFFER_READY media plugin event data and
+                         * sends it to the server to renegotiate the AV session.
+                         */
+                        function sendRenegotiationOffer(sdp, url) {
+                            log('Renegotiation SDP offer:\n', sdp);
+                            // cache operation id
+                            var operationId = guid();
+                            outAvRenegoOpIds[operationId] = "";
+                            return ucwa.send('POST', url, {
+                                headers: { 'Content-Type': 'application/sdp' },
+                                query: { operationId: operationId },
+                                data: sdp,
+                                nobatch: true
+                            });
+                        }
+                        //#endregion
+                        //#region setOffer
+                        /**
+                         * Invokes pcAV.invoke("SetOffer", ...) with the given set of SDPs,
+                         * e.g. pcAV.invoke("SetOffer", false, 2, sdp1, id1, sdp2, id2).
+                         *
+                         * @param {Object[]} offers
+                         * @returns Whatever pcAV returns.
+                         */
+                        function setOffer(offers) {
+                            assert(offers.length >= 0);
+                            var i, offer, args = ['SetOffer', false, offers.length];
+                            for (i = 0; i < offers.length; i++) {
+                                offer = offers[i];
+                                assert('sdp' in offer);
+                                assert('id' in offer);
+                                args.push(offer.sdp);
+                                args.push(offer.id);
+                            }
+                            return pcAV.invoke.apply(pcAV, args);
+                        }
+                        //#endregion
+                        //#region resumeAudioVideo
+                        /**
+                         * Activates (resumes) the AV conference call created in inactive state
+                         * when a p2p call is escalated to a conference.
+                         */
+                        function resumeAudioVideo() {
+                            var audioConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */;
+                            mainVideoConfig = activeModalities.video ?
+                                (onHold() ? 4 /* NO_ACTIVE_MEDIA */ : 3 /* BOTH */) :
+                                0 /* NOT_PRESENT */;
+                            var moreChannels = mainVideoConfig != 0 /* NOT_PRESENT */;
+                            pcAV.invoke('SetMediaConfig', audioConfig, // audio configuration
+                            mainVideoConfig, // main video configuration
+                            moreChannels ? mediaConfig.maxVideoChannelCount() - 1 : 0, // additional video channel count
+                            moreChannels ? 2 /* RECEIVE */ : 0 /* NOT_PRESENT */, // additional video config
+                            0 /* NOT_PRESENT */); // panoVideoConfig
+                        }
+                        //#endregion
+                        //#region setRenegotiationOffer
+                        function setRenegotiationOffer(sdp) {
+                            // LWA uses the empty string as the Content-ID for the SDP in the case of renegotiation
+                            var id = '';
+                            var audioConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ :
                                 3 /* BOTH */;
-                        log('Incoming SDP offer:\n' + sdp);
-                        pcAV.invoke('SetAcceptedMedia', audioConfig, videoConfig);
-                        pcAV.invoke('SetOffer', false, 1, sdp, id);
-                    }
-                    //#endregion
-                    //#region setProvisionalAnswer
-                    /**
-                     * Sets the provisional SDP answer from the remote party
-                     */
-                    function setProvisionalAnswer(mediaAnswer, remoteEndpoint) {
-                        var sdp = DataUri(mediaAnswer).data;
-                        log('Provisional answer from the remote party:\n' + sdp);
-                        pcAV.invoke('SetProvisionalAnswer', true, true, remoteEndpoint, sdp);
-                    }
-                    //#endregion
-                    //#region setFinalAnswer
-                    /**
-                     * Sets the final SDP answer from the remote party
-                     */
-                    function setFinalAnswer(mediaAnswer, remoteEndpoint) {
-                        var sdp = DataUri(mediaAnswer).data;
-                        log('Final answer from the remote party:\n' + sdp);
-                        pcAV.invoke('SetFinalAnswer', remoteEndpoint, sdp);
-                    }
-                    //#endregion
-                    //#region completeNegotiation
-                    /**
-                     * Completes SDP negotiation
-                     */
-                    function completeNegotiation(eventStatus, reason) {
-                        var errCode;
-                        // the component may have already been cleaned up (the caller canceled the call
-                        // while it was connecting)
-                        if (pcAV) {
-                            errCode = eventStatus == 'Success' ?
-                                Internal.MediaEnum.NegotiationStatus.NS_SUCCESS :
-                                (reason && reason.code == 'RemoteFailure') ?
-                                    Internal.MediaEnum.NegotiationStatus.NS_REMOTE_INTERNAL_ERROR :
-                                    Internal.MediaEnum.NegotiationStatus.NS_LOCAL_INTERNAL_ERROR;
-                            pcAV.invoke('CompleteNegotiation', errCode);
+                            // When the remote participant adds video to an audio conversation, we auto-accept incoming
+                            // video only. The local participant can turn their video on later via video.channels(0).isStarted(true).
+                            var videoConfig = onHold() ? 4 /* NO_ACTIVE_MEDIA */ :
+                                videoState() != Internal.Modality.State.Connected && /\bm=video\b/gmi.test(sdp) ? 2 /* RECEIVE */ :
+                                    3 /* BOTH */;
+                            log('Incoming SDP offer:\n' + sdp);
+                            pcAV.invoke('SetAcceptedMedia', audioConfig, videoConfig);
+                            pcAV.invoke('SetOffer', false, 1, sdp, id);
                         }
+                        //#endregion
+                        //#region setProvisionalAnswer
+                        /**
+                         * Sets the provisional SDP answer from the remote party
+                         */
+                        function setProvisionalAnswer(mediaAnswer, remoteEndpoint) {
+                            var sdp = DataUri(mediaAnswer).data;
+                            log('Provisional answer from the remote party:\n' + sdp);
+                            pcAV.invoke('SetProvisionalAnswer', true, true, remoteEndpoint, sdp);
+                        }
+                        //#endregion
+                        //#region setFinalAnswer
+                        /**
+                         * Sets the final SDP answer from the remote party
+                         */
+                        function setFinalAnswer(mediaAnswer, remoteEndpoint) {
+                            var sdp = DataUri(mediaAnswer).data;
+                            log('Final answer from the remote party:\n' + sdp);
+                            pcAV.invoke('SetFinalAnswer', remoteEndpoint, sdp);
+                        }
+                        //#endregion
+                        //#region completeNegotiation
+                        /**
+                         * Completes SDP negotiation
+                         */
+                        function completeNegotiation(eventStatus, reason) {
+                            var errCode;
+                            // the component may have already been cleaned up (the caller canceled the call
+                            // while it was connecting)
+                            if (pcAV) {
+                                errCode = eventStatus == 'Success' ?
+                                    Internal.MediaEnum.NegotiationStatus.NS_SUCCESS :
+                                    (reason && reason.code == 'RemoteFailure') ?
+                                        Internal.MediaEnum.NegotiationStatus.NS_REMOTE_INTERNAL_ERROR :
+                                        Internal.MediaEnum.NegotiationStatus.NS_LOCAL_INTERNAL_ERROR;
+                                pcAV.invoke('CompleteNegotiation', errCode);
+                            }
+                        }
+                        //#endregion
+                        //#region getStartAudioVideoUri
+                        /**
+                         * The first SDP offer is sent to the link given by this function.
+                         */
+                        function getStartAudioVideoLink() {
+                            // if the AV modality is the 1-st modality in the conversation,
+                            // send a request to the global startAudioVideo link
+                            if (!rConversation)
+                                return ucwa.get({ rel: 'communication' }).link('startAudioVideo');
+                            // if this is an escalation from P2P to a conference, send the
+                            // request to the escalation link
+                            if (escalateAudioVideoUri)
+                                return ucwa.get(escalateAudioVideoUri); // TODO: .link('self')?
+                            // if the AV modality gets added to an existing conversation,
+                            // send the request to its addAudioVideo link
+                            return ucwa.send('GET', rConversation.link('audioVideo').href).then(function (rAV) {
+                                return rAV.link('addAudioVideo');
+                            });
+                        }
+                        //#endregion
+                        return self;
                     }
-                    //#endregion
-                    //#region getStartAudioVideoUri
-                    /**
-                     * The first SDP offer is sent to the link given by this function.
-                     */
-                    function getStartAudioVideoLink() {
-                        // if the AV modality is the 1-st modality in the conversation,
-                        // send a request to the global startAudioVideo link
-                        if (!rConversation)
-                            return ucwa.get({ rel: 'communication' }).link('startAudioVideo');
-                        // if this is an escalation from P2P to a conference, send the
-                        // request to the escalation link
-                        if (escalateAudioVideoUri)
-                            return ucwa.get(escalateAudioVideoUri);
-                        // if the AV modality gets added to an existing conversation,
-                        // send the request to its addAudioVideo link
-                        return ucwa.send('GET', rConversation.link('audioVideo').href).then(function (rAV) {
-                            return rAV.link('addAudioVideo');
-                        });
-                    }
-                    //#endregion
-                    return self;
-                }
+                    return AudioVideoSession;
+                })();
                 Internal.AudioVideoSession = AudioVideoSession;
             })(Internal = Model.Internal || (Model.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
@@ -16676,501 +16660,490 @@ var Skype;
                 /**
                  * AudioVideo part of a multi-modal conversation.
                  *
-                 * @param {Me} me
-                 * @param {UCWA} ucwa
-                 * @param {MediaPlugin} mediaPlugin
-                 * @param {Devices} [devices] - Audio and video devices.
-                 * @param {String} [threadId] - Required for outgoing calls.
-                 * @param {AudioVideoInvitation} [invitation] - Required for incoming calls.
-                 * @param {Collection} participants
-                 * @param {Participant} selfParticipant
-                 * @param {Resource} [rConversation] - The parent rel=conversation resource.
-                 *
-                 *      If the AV modality gets added to an existing conversation, the AV call
-                 *      is started by sending a POST request to conversation/audioVideo/addAudioVideo.
-                 *      If the AV modality is the first modality in the conversation, then the
-                 *      AV call is started by sending the same request to the global startAudioVideo link.
-                 *
-                 * @param {Conversation} [conversation] - the parent conversation object
-                 *
-                 * @property {Modality.State} state
-                 * @property {Boolean} muted - get/set whether the audio is muted
-                 * @property {Boolean} onHold - get/set whether the audio/video is on hold
-                 *
-                 * @member {Participant} from
-                 *
-                 * @command {Promise} start - Starts an outgoing call.
-                 * @command {Promise} accept - Accepts an incoming call.
-                 * @command {Promise} decline - Declines an incoming call.
-                 * @command {Promise} stop - Stops the call.
-                 * @command {Promise} sendDtmf - Sends a DTMF tone.
-                 * @command {Promise} showParticipantVideo
-                 * @command {Promise} removeParticipantVideo
-                 *
                  * @created Oct 2013
                  * @blame sosobov
                  */
-                function AudioVideoModality(options) {
-                    var self = Model(), ucwa = options.ucwa, rInvitation = options.rInvitation, participants = options.participants, guestName = options.guestName, selfParticipant = options.selfParticipant, localUri = options.me.id(), // SIP URI of the signed-in user
-                    remoteUri, // SIP URI of the remote party in a P2P conversation
-                    mediaPlugin = options.mediaPlugin, // MediaPlugin
-                    devices = options.devices, // Devices
-                    tm = options.tm, conversation = options.conversation, rConversation = options.rConversation, // conversation resource
-                    avs, // the active AudioVideoSession in this conversation
-                    avsEsc, // AudioVideoSession created when a P2P conversation is escalated to a
-                    // multi-party conference
-                    // a unique id of this modality - handy for debugging this modality's
-                    // server event subscription
-                    thisModalityId = random(), isAVInvitation = rInvitation && rInvitation.rel == 'audioVideoInvitation', 
-                    // we are ignoring the AV part of the meeting invitation because we are 
-                    // using the messaging part of the meeting invitation to accept/decline 
-                    isMeetingInvitation = rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
-                        !conversation.meeting.availableModalities.messaging(), isAudioMeetingInvitation = isMeetingInvitation &&
-                        conversation.meeting.availableModalities.audio(), isVideoMeetingInvitation = isMeetingInvitation &&
-                        conversation.meeting.availableModalities.video(), 
-                    // AudioVideoInvitation (for P2P incoming calls)
-                    invitation = isAVInvitation &&
-                        Internal.AudioVideoInvitation({
+                var AudioVideoModality = (function () {
+                    //#endregion
+                    function AudioVideoModality(options) {
+                        var self = Model(), ucwa = options.ucwa, rInvitation = options.rInvitation, participants = options.participants, guestName = options.guestName, selfParticipant = options.selfParticipant, localUri = options.me.id(), // SIP URI of the signed-in user
+                        remoteUri, // SIP URI of the remote party in a P2P conversation
+                        mediaPlugin = options.mediaPlugin, // MediaPlugin
+                        devices = options.devices, // Devices
+                        tm = options.tm, conversation = options.conversation, rConversation = options.rConversation, // conversation resource
+                        avs, // the active AudioVideoSession in this conversation
+                        avsEsc, // AudioVideoSession created when a P2P conversation is escalated to a
+                        // multi-party conference
+                        // a unique id of this modality - handy for debugging this modality's
+                        // server event subscription
+                        thisModalityId = random(), isAVInvitation = rInvitation && rInvitation.rel == 'audioVideoInvitation', 
+                        // we are ignoring the AV part of the meeting invitation because we are 
+                        // using the messaging part of the meeting invitation to accept/decline 
+                        isMeetingInvitation = rInvitation && rInvitation.rel == 'onlineMeetingInvitation' &&
+                            !conversation.meeting.availableModalities.messaging(), isAudioMeetingInvitation = isMeetingInvitation &&
+                            conversation.meeting.availableModalities.audio(), isVideoMeetingInvitation = isMeetingInvitation &&
+                            conversation.meeting.availableModalities.video(), 
+                        // AudioVideoInvitation (for P2P incoming calls)
+                        invitation = isAVInvitation && Internal.AudioVideoInvitation({
                             resource: rInvitation,
                             ucwa: ucwa,
                             from: getFrom(rInvitation)
                         }), rAVInvitation = isAVInvitation && rInvitation, // audioVideoInvitation resource
-                    sStartingAV = {}, // serves as state.reason when state=Notified
-                    // thread id - a unique id of the parent conversation is passed as param for the outgoing
-                    // call or is extracted from the audioVideoInvitation for the incoming call
-                    threadId = options.threadId || rInvitation && rInvitation.get('threadId'), state = Property({
-                        value: invitation || isMeetingInvitation ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    }), audioState = Property({
-                        value: invitation || isAudioMeetingInvitation ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    }), videoState = Property({
-                        value: invitation && invitation.hasVideo() || isVideoMeetingInvitation ?
-                            Internal.Modality.State.Notified :
-                            Internal.Modality.State.Disconnected
-                    });
-                    // remove rInvitation if we are ignoring the AV part of the meeting invitation 
-                    if (!invitation && !isMeetingInvitation)
-                        rInvitation = null;
-                    options = null;
-                    //#region public properties
-                    // mutes/unmutes the audio channel or returns the mute status
-                    var muted = Property({
-                        value: false,
-                        get: function () {
-                            return avs.muted.get();
-                        },
-                        set: function (val) {
-                            return avs.muted.set(val);
-                        }
-                    });
-                    // holds/resumes audio/video or returns the onHold status
-                    var onHold = Property({
-                        value: false,
-                        get: function () {
-                            return avs.onHold.get();
-                        },
-                        set: function (val) {
-                            return avs.onHold.set(val);
-                        }
-                    });
-                    //#endregion
-                    //#region init
-                    function init() {
-                        state.changed(function (newState, reason, oldState) {
-                            log('AudioVideoModality(' + thisModalityId + ')::state: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        sStartingAV = {}, // serves as state.reason when state=Notified
+                        // thread id - a unique id of the parent conversation is passed as param for the outgoing
+                        // call or is extracted from the audioVideoInvitation for the incoming call
+                        threadId = options.threadId || rInvitation && rInvitation.get('threadId'), state = Property({
+                            value: invitation || isMeetingInvitation ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
+                        }), audioState = Property({
+                            value: invitation || isAudioMeetingInvitation ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
+                        }), videoState = Property({
+                            value: invitation && invitation.hasVideo() || isVideoMeetingInvitation ?
+                                Internal.Modality.State.Notified :
+                                Internal.Modality.State.Disconnected
                         });
-                        audioState.changed(function (newState, reason, oldState) {
-                            log('AudioVideoModality(' + thisModalityId + ')::audioState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        // remove rInvitation if we are ignoring the AV part of the meeting invitation 
+                        if (!invitation && !isMeetingInvitation)
+                            rInvitation = null;
+                        options = null;
+                        //#region public properties
+                        // mutes/unmutes the audio channel or returns the mute status
+                        var muted = Property({
+                            value: false,
+                            get: function () {
+                                return avs.muted.get();
+                            },
+                            set: function (val) {
+                                return avs.muted.set(val);
+                            }
                         });
-                        videoState.changed(function (newState, reason, oldState) {
-                            log('AudioVideoModality(' + thisModalityId + ')::videoState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                        // holds/resumes audio/video or returns the onHold status
+                        var onHold = Property({
+                            value: false,
+                            get: function () {
+                                return avs.onHold.get();
+                            },
+                            set: function (val) {
+                                return avs.onHold.set(val);
+                            }
                         });
-                        state.when(Internal.Modality.State.Disconnected, reset);
-                        // this is a permanent video state subscription to ensure that self-participant's video
-                        // state is in fact AVM's video state.
-                        // TODO: alternatively selfParticipant's videoState can be a sourced property of AVM.videoState.
-                        videoState.changed(selfParticipant[Internal.sInternal].videoState);
-                        extend(self, {
-                            state: state.asReadOnly(),
-                            audioState: audioState.asReadOnly(),
-                            videoState: videoState.asReadOnly(),
-                            muted: muted,
-                            onHold: onHold,
-                            showParticipantVideo: showParticipantVideo,
-                            removeParticipantVideo: removeParticipantVideo
-                        });
-                        if (invitation)
-                            self.from = invitation.from;
-                        ucwa.event(onServerEvent);
-                        log('AudioVideoModality(' + thisModalityId + ') created');
-                    }
-                    //#endregion
-                    //#region reset
-                    function reset() {
-                        if (avs) {
-                            avs.state.changed.off(state);
-                            avs.audioState.changed.off(audioState);
-                            avs.videoState.changed.off(videoState);
-                        }
-                        state(Internal.Modality.State.Disconnected);
-                        audioState(Internal.Modality.State.Disconnected);
-                        videoState(Internal.Modality.State.Disconnected);
-                        rAVInvitation = null;
-                        avs = null;
-                    }
-                    //#endregion
-                    //#region private utils and event handlers
-                    function defineAsyncCommand(name, states, method) {
-                        var enabled = Property();
-                        self[name] = Command(async(method), enabled);
-                        state.changed(function (value) {
-                            var isEnabled = contains(states, function (s) {
-                                return isArray(s) ?
-                                    value == s[0] && state.reason === s[1] :
-                                    value == s;
+                        //#endregion
+                        function init() {
+                            state.changed(function (newState, reason, oldState) {
+                                log('AudioVideoModality(' + thisModalityId + ')::state: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
                             });
-                            enabled(isEnabled);
-                        });
-                    }
-                    function isConferencing() {
-                        var convState = rConversation && rConversation.get('state', '');
-                        return convState == 'Conferencing' || convState == 'Conferenced';
-                    }
-                    // AudioVideoSession 'escalated' event handler
-                    //   replaces the p2p session with the conference session if escalation succeeded;
-                    //   destroys the conference session if escalation failed.
-                    function onAVSessionEscalated(status) {
-                        var fMuted;
-                        if (status == 'success') {
-                            fMuted = avs.muted();
-                            // replace the old P2P AV session with the new AV conference session and
-                            // delete the old session
-                            avs.state.changed.off(state);
-                            avs.audioState.changed.off(audioState);
-                            avs.videoState.changed.off(videoState);
-                            avs.stop(Internal.sEscalation);
-                            avs = avsEsc;
-                            avs.state.changed(state);
-                            avs.audioState.changed(audioState);
-                            avs.videoState.changed(videoState);
-                            avsEsc.escalated.off(onAVSessionEscalated);
-                            avsEsc = null;
-                            if (fMuted)
-                                avs.muted(fMuted);
+                            audioState.changed(function (newState, reason, oldState) {
+                                log('AudioVideoModality(' + thisModalityId + ')::audioState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                            });
+                            videoState.changed(function (newState, reason, oldState) {
+                                log('AudioVideoModality(' + thisModalityId + ')::videoState: %c' + oldState + ' -> ' + newState, 'color:green;font-weight:bold', 'Reason: ', reason);
+                            });
+                            state.when(Internal.Modality.State.Disconnected, reset);
+                            // this is a permanent video state subscription to ensure that self-participant's video
+                            // state is in fact AVM's video state.
+                            // TODO: alternatively selfParticipant's videoState can be a sourced property of AVM.videoState.
+                            videoState.changed(selfParticipant[Internal.sInternal].videoState);
+                            extend(self, {
+                                state: state.asReadOnly(),
+                                audioState: audioState.asReadOnly(),
+                                videoState: videoState.asReadOnly(),
+                                muted: muted,
+                                onHold: onHold,
+                                showParticipantVideo: showParticipantVideo,
+                                removeParticipantVideo: removeParticipantVideo
+                            });
+                            if (invitation)
+                                self.from = invitation.from;
+                            ucwa.event(onServerEvent);
+                            log('AudioVideoModality(' + thisModalityId + ') created');
                         }
-                        else if (status == 'failure') {
-                            avsEsc.escalated.off(onAVSessionEscalated);
-                            avsEsc.stop();
-                            avsEsc = null;
+                        function reset() {
+                            if (avs) {
+                                avs.state.changed.off(state);
+                                avs.audioState.changed.off(audioState);
+                                avs.videoState.changed.off(videoState);
+                            }
+                            state(Internal.Modality.State.Disconnected);
+                            audioState(Internal.Modality.State.Disconnected);
+                            videoState(Internal.Modality.State.Disconnected);
+                            rAVInvitation = null;
+                            avs = null;
                         }
-                        else {
-                            assert(false);
-                        }
-                    }
-                    // UCWA events handler
-                    function onServerEvent(event) {
-                        var id = event.target.rel + ' ' + event.type;
-                        var r = event.resource;
-                        switch (id) {
-                            // when a new AV conversation is started (using rel=startAudioVideo)
-                            // the conversation is added after this object is created.
-                            case 'conversation added':
-                                if (r.get('threadId') == threadId)
-                                    rConversation = r;
-                                break;
-                            case 'conversation updated':
-                                // add participants to a meeting created by this modality's start()
-                                if (rConversation && r.href == rConversation.href && isConferencing() &&
-                                    rConversation.hasLink('addParticipant'))
-                                    conversation[Internal.sInternal].inviteParticipants();
-                                break;
-                            case 'escalateAudio added':
-                                if (event.sender.href == rConversation.href)
-                                    startEscalation({
-                                        uri: event.target.href
-                                    });
-                                break;
-                            case 'escalateAudioVideo added':
-                                if (event.sender.href == rConversation.href)
-                                    startEscalation({
-                                        uri: event.target.href,
-                                        video: true // video container will be retained by the selfParticipant
-                                    });
-                                break;
-                            case 'audioVideoInvitation completed':
-                                // incoming invitation was canceled or timed out while this client ignored
-                                // the invitation (neither accepted nor declined)
-                                if (!avs && rAVInvitation && rAVInvitation.href == r.href &&
-                                    r.get('direction') == 'Incoming' &&
-                                    event.status == 'Failure') {
-                                    state(Internal.Modality.State.Disconnected, event.reason);
-                                }
-                                break;
-                            case 'audioVideoInvitation started':
-                                // audioVideo can be added to an existing 1:1 conversation by the remote participant
-                                if (r.has('direction') && r.get('direction') == 'Incoming' &&
-                                    r.link('conversation').href == rConversation.href) {
-                                    rAVInvitation = r;
-                                    invitation = Internal.AudioVideoInvitation({
-                                        resource: r,
-                                        ucwa: ucwa,
-                                        from: getFrom(r)
-                                    });
-                                    state(Internal.Modality.State.Notified);
-                                    if (invitation.hasVideo())
-                                        videoState(Internal.Modality.State.Notified);
-                                    else
-                                        audioState(Internal.Modality.State.Notified);
-                                }
-                                break;
-                        }
-                    }
-                    // Finds a participant object that represents the inviter in the incoming call
-                    //   The participant key in the participants collection can be either the participant href or the contact href.
-                    //   The "from" participant resource embedded in the invitation has the participant href and the uri, so
-                    //   we use either one to match the inviter.
-                    function getFrom(rInvitation) {
-                        var from = find(participants(), function (p) { return p[Internal.sHref] == rInvitation.link('from').href; }), rFrom, fromUri;
-                        if (!from) {
-                            rFrom = ucwa.get(rInvitation.link('from').href);
-                            fromUri = rFrom.get('uri');
-                            participants.each(function (p) {
-                                if (p.person.id() == fromUri)
-                                    from = p;
+                        //#region private utils and event handlers
+                        function defineAsyncCommand(name, states, method) {
+                            var enabled = Property();
+                            self[name] = Command(async(method), enabled);
+                            state.changed(function (value) {
+                                var isEnabled = contains(states, function (s) {
+                                    return isArray(s) ?
+                                        value == s[0] && state.reason === s[1] :
+                                        value == s;
+                                });
+                                enabled(isEnabled);
                             });
                         }
-                        return from;
-                    }
-                    //#endregion
-                    //#region public methods
-                    /**
-                     * Starts an outgoing audio/video call
-                     *
-                     * @param {String} to - SIP URI of the remote participant.
-                     * @param {Dictionary|Boolean} [video] - If present, start both audio and video, otherwise only audio is started,
-                     *                                       e.g. av.start({video: true});
-                     * @param {HTMLElement} video.container - A DOM element that serves as the video window container for remote video,
-                     *                                        e.g. av.start({video: {container: myElement}});
-                     * @param {Object} [context] - An invitation context can accompany the generated audiovideo invitation.
-                     *
-                     * @returns {Promise}
-                     */
-                    defineAsyncCommand('start', [Internal.Modality.State.Connected, [Internal.Modality.State.Notified, sStartingAV], Internal.Modality.State.Disconnected], function (options) {
-                        var isMeeting = conversation.isGroupConversation();
-                        options = options || {};
-                        remoteUri = options.to;
-                        // ensures telemetry for audio is not sent when video is added to existing audio call.
-                        if (audioState() == 'Disconnected')
-                            tm && tm.record('Audio_Start');
-                        if (options.video)
-                            tm && tm.record('Video_Start');
-                        // in p2p mode take URI of the remote participant
-                        if (!isMeeting) {
-                            if (!remoteUri)
-                                remoteUri = participants(0).uri();
-                            else
-                                check(participants.size() == 0, 'ambiguous remote party in 1:1 call');
-                            check(remoteUri, 'the remote participant URI is not specified');
+                        function isConferencing() {
+                            var convState = rConversation && rConversation.get('state', '');
+                            return convState == 'Conferencing' || convState == 'Conferenced';
                         }
-                        if (!avs) {
-                            avs = Internal.AudioVideoSession({
+                        // AudioVideoSession 'escalated' event handler
+                        //   replaces the p2p session with the conference session if escalation succeeded;
+                        //   destroys the conference session if escalation failed.
+                        function onAVSessionEscalated(status) {
+                            var fMuted;
+                            if (status == 'success') {
+                                fMuted = avs.muted();
+                                // replace the old P2P AV session with the new AV conference session and
+                                // delete the old session
+                                avs.state.changed.off(state);
+                                avs.audioState.changed.off(audioState);
+                                avs.videoState.changed.off(videoState);
+                                avs.stop(Internal.sEscalation);
+                                avs = avsEsc;
+                                avs.state.changed(state);
+                                avs.audioState.changed(audioState);
+                                avs.videoState.changed(videoState);
+                                avsEsc.escalated.off(onAVSessionEscalated);
+                                avsEsc = null;
+                                if (fMuted)
+                                    avs.muted(fMuted);
+                            }
+                            else if (status == 'failure') {
+                                avsEsc.escalated.off(onAVSessionEscalated);
+                                avsEsc.stop();
+                                avsEsc = null;
+                            }
+                            else {
+                                assert(false);
+                            }
+                        }
+                        // UCWA events handler
+                        function onServerEvent(event) {
+                            var id = event.target.rel + ' ' + event.type;
+                            var r = event.resource;
+                            switch (id) {
+                                // when a new AV conversation is started (using rel=startAudioVideo)
+                                // the conversation is added after this object is created.
+                                case 'conversation added':
+                                    if (r.get('threadId') == threadId)
+                                        rConversation = r;
+                                    break;
+                                case 'conversation updated':
+                                    // add participants to a meeting created by this modality's start()
+                                    if (rConversation && r.href == rConversation.href && isConferencing() &&
+                                        rConversation.hasLink('addParticipant'))
+                                        conversation[Internal.sInternal].inviteParticipants();
+                                    break;
+                                case 'escalateAudio added':
+                                    if (event.sender.href == rConversation.href)
+                                        startEscalation({
+                                            uri: event.target.href
+                                        });
+                                    break;
+                                case 'escalateAudioVideo added':
+                                    if (event.sender.href == rConversation.href)
+                                        startEscalation({
+                                            uri: event.target.href,
+                                            video: true // video container will be retained by the selfParticipant
+                                        });
+                                    break;
+                                case 'audioVideoInvitation completed':
+                                    // incoming invitation was canceled or timed out while this client ignored
+                                    // the invitation (neither accepted nor declined)
+                                    if (!avs && rAVInvitation && rAVInvitation.href == r.href &&
+                                        r.get('direction') == 'Incoming' &&
+                                        event.status == 'Failure') {
+                                        state(Internal.Modality.State.Disconnected, event.reason);
+                                    }
+                                    break;
+                                case 'audioVideoInvitation started':
+                                    // audioVideo can be added to an existing 1:1 conversation by the remote participant
+                                    if (r.has('direction') && r.get('direction') == 'Incoming' &&
+                                        r.link('conversation').href == rConversation.href) {
+                                        rAVInvitation = r;
+                                        invitation = Internal.AudioVideoInvitation({
+                                            resource: r,
+                                            ucwa: ucwa,
+                                            from: getFrom(r)
+                                        });
+                                        state(Internal.Modality.State.Notified);
+                                        if (invitation.hasVideo())
+                                            videoState(Internal.Modality.State.Notified);
+                                        else
+                                            audioState(Internal.Modality.State.Notified);
+                                    }
+                                    break;
+                            }
+                        }
+                        // Finds a participant object that represents the inviter in the incoming call
+                        //   The participant key in the participants collection can be either the participant href or the contact href.
+                        //   The "from" participant resource embedded in the invitation has the participant href and the uri, so
+                        //   we use either one to match the inviter.
+                        function getFrom(rInvitation) {
+                            var from = find(participants(), function (p) { return p[Internal.sHref] == rInvitation.link('from').href; }), rFrom, fromUri;
+                            if (!from) {
+                                rFrom = ucwa.get(rInvitation.link('from').href);
+                                fromUri = rFrom.get('uri');
+                                participants.each(function (p) {
+                                    if (p.person.id() == fromUri)
+                                        from = p;
+                                });
+                            }
+                            return from;
+                        }
+                        //#endregion
+                        //#region public methods
+                        //#region start
+                        /**
+                         * Starts an outgoing audio/video call
+                         *
+                         * @param {String} to - SIP URI of the remote participant.
+                         * @param {Dictionary|Boolean} [video] - If present, start both audio and video, otherwise only audio is started,
+                         *                                       e.g. av.start({video: true});
+                         * @param {HTMLElement} video.container - A DOM element that serves as the video window container for remote video,
+                         *                                        e.g. av.start({video: {container: myElement}});
+                         * @param {Object} [context] - An invitation context can accompany the generated audiovideo invitation.
+                         *
+                         * @returns {Promise}
+                         */
+                        defineAsyncCommand('start', [Internal.Modality.State.Connected, [Internal.Modality.State.Notified, sStartingAV], Internal.Modality.State.Disconnected], function (options) {
+                            var isMeeting = conversation.isGroupConversation();
+                            options = options || {};
+                            remoteUri = options.to;
+                            // ensures telemetry for audio is not sent when video is added to existing audio call.
+                            if (audioState() == 'Disconnected')
+                                tm && tm.record('Audio_Start');
+                            if (options.video)
+                                tm && tm.record('Video_Start');
+                            // in p2p mode take URI of the remote participant
+                            if (!isMeeting) {
+                                if (!remoteUri)
+                                    remoteUri = participants(0).uri();
+                                else
+                                    check(participants.size() == 0, 'ambiguous remote party in 1:1 call');
+                                check(remoteUri, 'the remote participant URI is not specified');
+                            }
+                            if (!avs) {
+                                avs = new Internal.AudioVideoSession({
+                                    ucwa: ucwa,
+                                    mediaPlugin: mediaPlugin,
+                                    devices: devices,
+                                    localUri: localUri,
+                                    threadId: threadId,
+                                    context: options.context,
+                                    invitation: invitation,
+                                    rInvitation: rInvitation,
+                                    conversation: conversation,
+                                    rConversation: rConversation,
+                                    participants: participants,
+                                    selfParticipant: selfParticipant,
+                                    // these are given by unit tests:
+                                    operationId: options.operationId,
+                                    sessionContext: options.sessionContext
+                                });
+                                avs.state.changed(state);
+                                avs.audioState.changed(audioState);
+                                avs.videoState.changed(videoState);
+                            }
+                            return Task.wait(null).then(function () {
+                                if (conversation.meeting) {
+                                    if (conversation.meeting.state() == Internal.Modality.State.Created) {
+                                        return conversation.meeting.start({
+                                            name: guestName && guestName(),
+                                            uri: conversation.uri()
+                                        });
+                                    }
+                                }
+                                else if (isMeeting) {
+                                    return conversation.addMeeting().start();
+                                }
+                            }).then(function () {
+                                return avs.start({
+                                    remoteUri: remoteUri,
+                                    audioConfig: 3 /* BOTH */,
+                                    mainVideoConfig: options.video ?
+                                        3 /* BOTH */ :
+                                        0 /* NOT_PRESENT */,
+                                    video: options.video
+                                });
+                            }).then(function () {
+                                // the UI has a reasonable expectation that
+                                // once AV is used, all AV stuff is properly
+                                // initialized: the list of cams, mics and so on
+                                return devices && devices.init().catch();
+                            });
+                        });
+                        //#endregion
+                        //#region stop
+                        /**
+                         * Stops audio/video call
+                         *
+                         * @param {String} [modality] - if equals 'video', stops only video, if omitted both audio and video are stopped.
+                         * @returns {Promise}
+                         */
+                        defineAsyncCommand('stop', [Internal.Modality.State.Connected, Internal.Modality.State.Connecting], function (modality) {
+                            if (!avs)
+                                return;
+                            if (state() == Internal.Modality.State.Connecting)
+                                return avs.stop();
+                            if (modality == 'video') {
+                                avs.stop(modality);
+                                if (avsEsc)
+                                    avsEsc.stop(modality);
+                            }
+                            else if (!modality) {
+                                avs.stop();
+                                if (avsEsc) {
+                                    avsEsc.escalated.off(onAVSessionEscalated);
+                                    avsEsc.stop();
+                                }
+                                return Task.wait(null).then(function () {
+                                    return ucwa.send('GET', rConversation.link('audioVideo').href);
+                                }).then(function (rAudioVideo) {
+                                    // while audioVideo is being escalated from P2P to a meeting it does
+                                    // not have the stopAudioVideo link for a short interval, so this may throw
+                                    return ucwa.send('POST', rAudioVideo.link('stopAudioVideo').href);
+                                }).finally(function () {
+                                    state(Internal.Modality.State.Disconnected);
+                                });
+                            }
+                            else {
+                                throw EInvalidArgument('modality', 'must be omitted or contain `video`');
+                            }
+                        });
+                        //#endregion
+                        //#region accept
+                        /**
+                         * Accepts an incoming audio/video invitation.
+                         *
+                         * @param {Dictionary} [video] - The video window container holder.
+                         * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
+                         *
+                         * @returns {Promise}
+                         */
+                        defineAsyncCommand('accept', [Internal.Modality.State.Notified], function (options) {
+                            if (isMeetingInvitation) {
+                                return conversation.meeting.accept().then(function () {
+                                    state(Internal.Modality.State.Notified, sStartingAV);
+                                    return self.start(options);
+                                });
+                            }
+                            options = options || {};
+                            assert(!avs);
+                            avs = new Internal.AudioVideoSession({
                                 ucwa: ucwa,
                                 mediaPlugin: mediaPlugin,
                                 devices: devices,
                                 localUri: localUri,
                                 threadId: threadId,
-                                context: options.context,
-                                invitation: invitation,
-                                rInvitation: rInvitation,
+                                rAVInvitation: rAVInvitation,
                                 conversation: conversation,
                                 rConversation: rConversation,
                                 participants: participants,
                                 selfParticipant: selfParticipant,
-                                // these are given by unit tests:
-                                operationId: options.operationId,
-                                sessionContext: options.sessionContext
+                                invitation: invitation
                             });
                             avs.state.changed(state);
                             avs.audioState.changed(audioState);
                             avs.videoState.changed(videoState);
-                        }
-                        return Task.wait(null).then(function () {
-                            if (conversation.meeting) {
-                                if (conversation.meeting.state() == Internal.Modality.State.Created) {
-                                    return conversation.meeting.start({
-                                        name: guestName && guestName(),
-                                        uri: conversation.uri()
-                                    });
-                                }
-                            }
-                            else if (isMeeting) {
-                                return conversation.addMeeting().start();
-                            }
-                        }).then(function () {
-                            return avs.start({
-                                remoteUri: remoteUri,
-                                audioConfig: 3 /* BOTH */,
-                                mainVideoConfig: options.video ?
-                                    3 /* BOTH */ : 0 /* NOT_PRESENT */,
-                                video: options.video
+                            return avs.accept(options).then(function () {
+                                // the UI has a reasonable expectation that
+                                // once AV is used, all AV stuff is properly
+                                // initialized: the list of cams, mics and so on
+                                return devices && devices.init().catch();
                             });
                         });
-                    });
-                    /**
-                     * Stops audio/video call
-                     *
-                     * @param {String} [modality] - if equals 'video', stops only video, if omitted both audio and video are stopped.
-                     * @returns {Promise}
-                     */
-                    defineAsyncCommand('stop', [Internal.Modality.State.Connected, Internal.Modality.State.Connecting], function (modality) {
-                        if (!avs)
-                            return;
-                        if (state() == Internal.Modality.State.Connecting)
-                            return avs.stop();
-                        if (modality == 'video') {
-                            avs.stop(modality);
-                            if (avsEsc)
-                                avsEsc.stop(modality);
-                        }
-                        else if (arguments.length == 0) {
-                            avs.stop();
-                            if (avsEsc) {
-                                avsEsc.escalated.off(onAVSessionEscalated);
-                                avsEsc.stop();
-                            }
-                            return Task.wait(null).then(function () {
-                                return ucwa.send('GET', rConversation.link('audioVideo').href);
-                            }).then(function (rAudioVideo) {
-                                // while audioVideo is being escalated from P2P to a meeting it does
-                                // not have the stopAudioVideo link for a short interval, so this may throw
-                                return ucwa.send('POST', rAudioVideo.link('stopAudioVideo').href);
-                            }).finally(function () {
+                        //#endregion
+                        //#region decline
+                        /**
+                         * Declines an incoming audio/video invitation.
+                         * reason: 'Local' - reject just on this endpoint, 'Global' (default) - reject on all.
+                         * @returns {Promise}
+                         */
+                        defineAsyncCommand('decline', [Internal.Modality.State.Notified], function (reason) {
+                            if (reason === void 0) { reason = 'Global'; }
+                            assert(invitation, 'This is an outgoing call, so it cannot be "declined"');
+                            return invitation.decline(reason).then(function () {
                                 state(Internal.Modality.State.Disconnected);
                             });
+                        });
+                        //#endregion
+                        //#region sendDtmf
+                        /**
+                         * Sends a DTMF tone
+                         *
+                         * @param {String} tone - a DTMF tone from MediaEnum.DtmfTone enumeration
+                         * @returns {Promise}
+                         */
+                        defineAsyncCommand('sendDtmf', [Internal.Modality.State.Connected], function (tone) {
+                            // if avs is null the thrown exception will lead to promise rejection.
+                            return avs.sendDtmf(tone);
+                        });
+                        //#endregion
+                        /**
+                         * Shows participant's video
+                         *
+                         * @param {Participant} participant
+                         * @returns {Promise}
+                         */
+                        function showParticipantVideo(participant) {
+                            return avs.showParticipantVideo(participant);
                         }
-                        else {
-                            throw EInvalidArgument('modality', 'must be omitted or contain `video`');
+                        /**
+                         * Removes participant's video
+                         *
+                         * @param {Participant} participant
+                         * @returns {Promise}
+                         */
+                        function removeParticipantVideo(participant) {
+                            return avs.removeParticipantVideo(participant);
                         }
-                    });
-                    /**
-                     * Accepts an incoming audio/video invitation.
-                     *
-                     * @param {Dictionary} [video] - The video window container holder.
-                     * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
-                     *
-                     * @returns {Promise}
-                     */
-                    defineAsyncCommand('accept', [Internal.Modality.State.Notified], function (options) {
-                        if (isMeetingInvitation) {
-                            return conversation.meeting.accept().then(function () {
-                                state(Internal.Modality.State.Notified, sStartingAV);
-                                return self.start(options);
+                        //#endregion public methods
+                        //#region private methods
+                        /**
+                         * Starts a new AudioVideoSession that joins an online meeting.
+                         *
+                         * @param {String} uri - the uri to which the first SDP offer should be sent ('escalateAudio' or 'escalateAudioVideo uri).
+                         * @param {Dictionary} [video] - The video window container holder.
+                         * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
+                         *
+                         * @returns {Promise}
+                         */
+                        function startEscalation(options) {
+                            assert(!avsEsc);
+                            assert(isConferencing());
+                            avsEsc = new Internal.AudioVideoSession({
+                                ucwa: ucwa,
+                                mediaPlugin: mediaPlugin,
+                                devices: devices,
+                                localUri: localUri,
+                                threadId: threadId,
+                                conversation: conversation,
+                                rConversation: rConversation,
+                                participants: participants,
+                                selfParticipant: selfParticipant,
+                                escalateAudioVideoUri: options.uri
+                            });
+                            avsEsc.escalated(onAVSessionEscalated);
+                            if (options.video)
+                                avs.removeVideo();
+                            return avsEsc.start({
+                                remoteUri: remoteUri,
+                                audioConfig: 4 /* NO_ACTIVE_MEDIA */,
+                                mainVideoConfig: options.video ?
+                                    4 /* NO_ACTIVE_MEDIA */ : 0 /* NOT_PRESENT */,
+                                video: options.video
                             });
                         }
-                        options = options || {};
-                        assert(!avs);
-                        avs = Internal.AudioVideoSession({
-                            ucwa: ucwa,
-                            mediaPlugin: mediaPlugin,
-                            devices: devices,
-                            localUri: localUri,
-                            threadId: threadId,
-                            rAVInvitation: rAVInvitation,
-                            conversation: conversation,
-                            rConversation: rConversation,
-                            participants: participants,
-                            selfParticipant: selfParticipant,
-                            invitation: invitation
-                        });
-                        avs.state.changed(state);
-                        avs.audioState.changed(audioState);
-                        avs.videoState.changed(videoState);
-                        return avs.accept(options);
-                    });
-                    /**
-                     * Declines an incoming audio/video invitation.
-                     * reason: 'Local' - reject just on this endpoint, 'Global' (default) - reject on all.
-                     * @returns {Promise}
-                     */
-                    defineAsyncCommand('decline', [Internal.Modality.State.Notified], function (reason) {
-                        if (reason === void 0) { reason = 'Global'; }
-                        assert(invitation, 'This is an outgoing call, so it cannot be "declined"');
-                        return invitation.decline(reason).then(function () {
-                            state(Internal.Modality.State.Disconnected);
-                        });
-                    });
-                    /**
-                     * Sends a DTMF tone
-                     *
-                     * @param {String} tone - a DTMF tone from MediaEnum.DtmfTone enumeration
-                     * @returns {Promise}
-                     */
-                    defineAsyncCommand('sendDtmf', [Internal.Modality.State.Connected], function (tone) {
-                        // if avs is null the thrown exception will lead to promise rejection.
-                        return avs.sendDtmf(tone);
-                    });
-                    /**
-                     * Shows participant's video
-                     *
-                     * @param {Participant} participant
-                     * @returns {Promise}
-                     */
-                    function showParticipantVideo(participant) {
-                        return avs.showParticipantVideo(participant);
+                        //#endregion
+                        init();
+                        return self;
                     }
-                    /**
-                     * Removes participant's video
-                     *
-                     * @param {Participant} participant
-                     * @returns {Promise}
-                     */
-                    function removeParticipantVideo(participant) {
-                        return avs.removeParticipantVideo(participant);
-                    }
-                    //#endregion public methods
-                    //#region private methods
-                    /**
-                     * Starts a new AudioVideoSession that joins an online meeting.
-                     *
-                     * @param {String} uri - the uri to which the first SDP offer should be sent ('escalateAudio' or 'escalateAudioVideo uri).
-                     * @param {Dictionary} [video] - The video window container holder.
-                     * @param {HTMLElement} [video.container] - A DOM element that serves as the video window container for remote video.
-                     *
-                     * @returns {Promise}
-                     */
-                    function startEscalation(options) {
-                        assert(!avsEsc);
-                        assert(isConferencing());
-                        avsEsc = Internal.AudioVideoSession({
-                            ucwa: ucwa,
-                            mediaPlugin: mediaPlugin,
-                            devices: devices,
-                            localUri: localUri,
-                            threadId: threadId,
-                            conversation: conversation,
-                            rConversation: rConversation,
-                            participants: participants,
-                            selfParticipant: selfParticipant,
-                            escalateAudioVideoUri: options.uri
-                        });
-                        avsEsc.escalated(onAVSessionEscalated);
-                        if (options.video)
-                            avs.removeVideo();
-                        return avsEsc.start({
-                            remoteUri: remoteUri,
-                            audioConfig: 4 /* NO_ACTIVE_MEDIA */,
-                            mainVideoConfig: options.video ?
-                                4 /* NO_ACTIVE_MEDIA */ : 0 /* NOT_PRESENT */,
-                            video: options.video
-                        });
-                    }
-                    //#endregion
-                    init();
-                    return self;
-                }
+                    return AudioVideoModality;
+                })();
                 Internal.AudioVideoModality = AudioVideoModality;
             })(Internal = Model_6.Internal || (Model_6.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
@@ -20418,7 +20391,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model) {
+        (function (Model_16) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -20426,6 +20399,7 @@ var Skype;
                 var Property = Web.Utils.Property;
                 var BoolProperty = Web.Utils.BoolProperty;
                 var ConstProperty = Web.Utils.ConstProperty;
+                var Model = Web.Utils.Model;
                 /**
                  * A general purpose activity item like a text message, a video call, etc.
                  *
@@ -20441,7 +20415,7 @@ var Skype;
                             prototype.status.changed(function (newValue, newReason) { return reason(newReason); });
                         // create an object inherited from the prototype and add
                         // missing properties to the create object
-                        return inherit(prototype, {
+                        return inherit(Model(prototype), {
                             type: ConstProperty(type),
                             key: ConstProperty(key),
                             timestamp: ConstProperty(new Web.Date),
@@ -20453,7 +20427,7 @@ var Skype;
                     return ActivityItem;
                 })();
                 Internal.ActivityItem = ActivityItem;
-            })(Internal = Model.Internal || (Model.Internal = {}));
+            })(Internal = Model_16.Internal || (Model_16.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -20462,7 +20436,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_16) {
+        (function (Model_17) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -21097,7 +21071,7 @@ var Skype;
                         return url + '';
                     });
                 })(Person = Internal.Person || (Internal.Person = {}));
-            })(Internal = Model_16.Internal || (Model_16.Internal = {}));
+            })(Internal = Model_17.Internal || (Model_17.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -21106,7 +21080,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_17) {
+        (function (Model_18) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -21682,7 +21656,7 @@ var Skype;
                     return MePerson;
                 })();
                 Internal.MePerson = MePerson;
-            })(Internal = Model_17.Internal || (Model_17.Internal = {}));
+            })(Internal = Model_18.Internal || (Model_18.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -21691,7 +21665,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_18) {
+        (function (Model_19) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -22707,7 +22681,7 @@ var Skype;
                     return ChatService;
                 })();
                 Internal.ChatService = ChatService;
-            })(Internal = Model_18.Internal || (Model_18.Internal = {}));
+            })(Internal = Model_19.Internal || (Model_19.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -22716,7 +22690,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_19) {
+        (function (Model_20) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -23131,7 +23105,7 @@ var Skype;
                     return Participant;
                 })();
                 Internal.Participant = Participant;
-            })(Internal = Model_19.Internal || (Model_19.Internal = {}));
+            })(Internal = Model_20.Internal || (Model_20.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -23315,7 +23289,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_20) {
+        (function (Model_21) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -23533,19 +23507,20 @@ var Skype;
                                 dfdLocalParticipantHref = null;
                             }
                         });
-                        var avm; // AudioVideoModality object        
+                        var avm;
                         //#endregion
                         //#region participantActivityItems
                         /** add a participant activity item */
                         function addParticipantActivityItem(itemType, participant, error, key) {
                             var person = participant.person;
-                            var proto = Model({
+                            var item = new Internal.ActivityItem(itemType, key, {
                                 author: person,
                                 persons: ConstCollection([person]),
                                 context: ConstProperty(void 0, ENotSupported()),
                                 status: ConstProperty(error ? 'Failed' : 'Succeeded', error)
                             });
-                            activityItems.add(new Internal.ActivityItem(itemType, key, proto).isRead(true));
+                            item.isRead(true);
+                            activityItems.add(item);
                         }
                         /** sets up conditional creation of participant activity items */
                         function initParticipantActivityItems(localParticipant) {
@@ -23559,6 +23534,43 @@ var Skype;
                                 p.isJoined.changed(function (val) {
                                     if (allowPActivityItems())
                                         addParticipantActivityItem(val ? 'ParticipantJoined' : 'ParticipantLeft', p);
+                                });
+                            });
+                        }
+                        //#endregion
+                        //#region calling activity items
+                        /**
+                         * CallMissed = a transition from Connecting to Disconnected that bypasses Connected.
+                         * CallStarted = a transition to Connected
+                         * CallEnded = a transition to Disconnected
+                         */
+                        function initCallingActivityItems(state) {
+                            state.when(function (x) { return x == (isIncoming ? 'Notified' : 'Connecting'); }, function () {
+                                var dir = isIncoming ? 'Incoming' : 'Outgoing';
+                                var sub = isIncoming && state.once('Disconnected', function () {
+                                    var ended = new Internal.ActivityItem('CallMissed', null, {
+                                        direction: ConstProperty(dir),
+                                        duration: ConstProperty(null)
+                                    });
+                                    ended.isRead(true);
+                                    activityItems.add(ended);
+                                });
+                                state.once('Connected', function () {
+                                    sub && sub.dispose();
+                                    var started = new Internal.ActivityItem('CallStarted', null, {
+                                        direction: ConstProperty(dir),
+                                        duration: ConstProperty(null)
+                                    });
+                                    started.isRead(true);
+                                    activityItems.add(started);
+                                    state.once('Disconnected', function () {
+                                        var ended = new Internal.ActivityItem('CallEnded', null, {
+                                            direction: ConstProperty(dir),
+                                            duration: ConstProperty((new Web.Date - started.timestamp()) / 1000) // seconds
+                                        });
+                                        ended.isRead(true);
+                                        activityItems.add(ended);
+                                    });
                                 });
                             });
                         }
@@ -23701,12 +23713,11 @@ var Skype;
                                 markAllAsRead: EnabledAsyncCommand(function () { return activityItems.each(function (item) { return item.isRead(true); }); })
                             });
                             self.lastModificationTimestamp = lastModified.asReadOnly();
-                            avm = Internal.AudioVideoModality({
+                            avm = new Internal.AudioVideoModality({
                                 ucwa: ucwa,
                                 guestName: guestName,
                                 mediaPlugin: mediaPlugin,
                                 devices: devices,
-                                contactManager: contactManager,
                                 participants: participants.asReadOnly(),
                                 selfParticipant: localParticipant,
                                 threadId: threadId(),
@@ -23750,13 +23761,14 @@ var Skype;
                             // TODO: use SourcedModel to change the creator properly when resuming the conversation
                             self.creator = self.meeting ? self.meeting.creator :
                                 isIncoming ? participants(0).person :
-                                    rInvitation ? localParticipant :
+                                    rInvitation ? localParticipant.person :
                                         href ? restoreCreator() :
                                             localParticipant.person; // P2P outgoing conversation
                             state.changed(updateIsGroupConversation);
                             uri.changed(updateIsGroupConversation);
                             participants.size.changed(updateIsGroupConversation);
                             initParticipantActivityItems(localParticipant);
+                            initCallingActivityItems(localParticipant.audio.state);
                             self.avatarUrl = createAvatarUrl();
                         }
                         //#region Internal Methods
@@ -23764,10 +23776,10 @@ var Skype;
                         /** Internally the activity items aren't sorted.
                             However the interface exposes a list sorted by the timestamp. */
                         function addMessageActivityItem(message, key) {
-                            var i = new Internal.ActivityItem('TextMessage', key, message);
+                            var item = new Internal.ActivityItem('TextMessage', key, message);
                             if (message.direction() == 'Outgoing')
-                                i.isRead(true);
-                            activityItems.add(i, key);
+                                item.isRead(true);
+                            activityItems.add(item, key);
                         }
                         //#endregion
                         //#region fetchLogs
@@ -24375,8 +24387,6 @@ var Skype;
                          *      - conversation updated (the state changes to "Conferenced")
                          *      - onlineMeeting added in conversation
                          *
-                         * @param {String} uri - The SIP URI of the participant.
-                         *
                          * @created Jan 2014
                          * @blame antonkh
                          */
@@ -24585,7 +24595,7 @@ var Skype;
                         ModalityType.AppSharing = 'AppSharing';
                     })(ModalityType = Conversation.ModalityType || (Conversation.ModalityType = {}));
                 })(Conversation = Internal.Conversation || (Internal.Conversation = {}));
-            })(Internal = Model_20.Internal || (Model_20.Internal = {}));
+            })(Internal = Model_21.Internal || (Model_21.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -24594,7 +24604,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_21) {
+        (function (Model_22) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -24869,7 +24879,7 @@ var Skype;
                     return ConversationsManager;
                 })();
                 Internal.ConversationsManager = ConversationsManager;
-            })(Internal = Model_21.Internal || (Model_21.Internal = {}));
+            })(Internal = Model_22.Internal || (Model_22.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
@@ -24958,7 +24968,7 @@ var Skype;
     var Web;
     (function (Web) {
         var Model;
-        (function (Model_22) {
+        (function (Model_23) {
             var Internal;
             (function (Internal) {
                 'use strict';
@@ -25504,7 +25514,7 @@ var Skype;
                         State.SigningIn = 'SigningIn';
                     })(State = Application.State || (Application.State = {}));
                 })(Application = Internal.Application || (Internal.Application = {}));
-            })(Internal = Model_22.Internal || (Model_22.Internal = {}));
+            })(Internal = Model_23.Internal || (Model_23.Internal = {}));
         })(Model = Web.Model || (Web.Model = {}));
     })(Web = Skype.Web || (Skype.Web = {}));
 })(Skype || (Skype = {}));
