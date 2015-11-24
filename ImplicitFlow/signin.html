@@ -1,0 +1,82 @@
+﻿<!DOCTYPE html>
+<html>
+    
+    <head>
+        <meta charset="utf-8" />
+        <title>jCafe App</title>
+        <link href="index.css" rel="stylesheet" />
+        <script src="../../target/skypeweb.js"></script>
+        <script src="jquery.js"></script>
+    </head>
+    
+    <body>
+        <div class="signinframe">
+            <div>
+                <h3>Login:</h3>
+            </div>
+            <div>Tab Id</div>
+            <div id="tabId" contenteditable="true" class="input">9b0fdb2a252c4aca56847b17d11c5e5a</div>
+            <div>
+                <span class="enabled"><input type="radio" name="auth" value="implicit" checked="checked">implicit</span>
+            </div>
+            <div id="signIn" class="button enabled">SignIn</div>
+            <div id="signOut" class="button enabled">SignOut</div>
+            <br />
+            <div id="applicationState">SignedOut</div>
+            <select id="myAvailability" class="disabled">
+                <option value="Online">Online</option>
+                <option value="Busy">Busy</option>
+                <option value="BeRightBack">BeRightBack</option>
+                <option value="Away">Away</option>
+                <option value="DoNotDisturb">DoNotDisturb</option>
+                <option value="Reset" selected="selected">Reset ...</option>
+            </select>
+            <hr />
+        </div>
+        <script>
+            $(function () {
+                
+                var Application = Skype.Web.Model.Application;
+                
+                var app = new Application();
+                
+                var lblSignIn = $('#applicationState');
+        
+                function signInImpl(snapshot) {
+                    
+                    var origins = [
+                        'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+                        'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+                        'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root',
+                        'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root',
+                    ];
+                    
+                    
+                             var options = {
+                                id: '9b0fdb2a252c4aca56847b17d11c5e5a',
+                                client_id: 'e48d4214-364e-4731-b2b6-47dabf529218',
+                                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=microsoft.com',
+                                origins: origins,
+                            }
+                    
+                    app.signInManager.signIn(options).then(function() {
+                        lblSignIn.text('Signed in as ' + app.personsAndGroupsManager.mePerson.displayName());
+                    });
+                }
+
+                $('#signIn').click(function () {
+                    lblSignIn.text('Signing in...');
+                    signInImpl();
+                });
+
+                $('#signOut').click(function () {
+                    app.signInManager.signOut().then(function () {
+                        lblSignIn.text('Signed out');
+                                        app = new Application();
+
+                    });
+                });
+            })
+        </script>
+    </body>
+</html>
