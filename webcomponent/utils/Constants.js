@@ -53,9 +53,9 @@ define(["require", "exports", '../utils/UrlParser'], function (require, exports,
         // Azure AD Properties
         // Constants.AzureADInstanceUrl = UrlParser_1.default.isLocalhost() ? "https://login.microsoftonline.com/" :
         //     window.azureADInstance || "https://login.windows-ppe.net/";
-        Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
-        Constants.AzureADTenant = "skypeforcei.onmicrosoft.com";
-        Constants.AzureClientId = "f8acbf70-6af2-445c-adb0-a54706370fd4"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
+        Constants.AzureADInstanceUrl = "https://login.windows-ppe.net/";
+        Constants.AzureADTenant = "s4bwebsdk.ccsctp.net";
+        Constants.AzureClientId = "95899b4e-ca0b-4a09-b696-edd9229c4e56"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
 
         //Constants.AzureADTenant = "skypeforcei.onmicrosoft.com";
         //Constants.AzureClientId = "c715cb2d-69a4-441d-8ac6-e7b3c88c75b3"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";

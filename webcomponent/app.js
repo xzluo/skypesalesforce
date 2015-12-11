@@ -114,7 +114,9 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     }
                    
                     client.signInManager.signIn({
-                        auth: auth,
+                        //auth: auth,
+                        client_id: '95899b4e-ca0b-4a09-b696-edd9229c4e56',
+                        //oauth_uri: '...',
                         origins: origins
                     }).then(function () {
                 log('Logged In Succesfully');
@@ -142,8 +144,9 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             var options = {
                 id: '9b0fdb2a252c4aca56847b17d11c5e5a',
                 // client_id: 'e48d4214-364e-4731-b2b6-47dabf529218',
-                client_id: 'f8acbf70-6af2-445c-adb0-a54706370fd4',
-                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=microsoft.com',
+                client_id: '95899b4e-ca0b-4a09-b696-edd9229c4e56',
+                //oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=microsoft.com',
+                oauth_uri: 'https://login.windows-ppe.net/common/oauth2/authorize?domain_hint=s4bwebsdk.ccsctp.net',
                 origins: origins,
             }
 

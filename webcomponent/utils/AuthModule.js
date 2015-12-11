@@ -24,7 +24,8 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
                 tenant: Constants_1.default.AzureADTenant,
                 clientId: Constants_1.default.AzureClientId,
                 cacheLocation: 'localStorage',
-                redirectUri: window.location.origin
+                redirectUri: window.location.origin,
+                resource: 'https://webdir0d.tip.lync.com'
             });
             Logger_1.default.log('Handling callback after login');
             this.authContext.handleWindowCallback();
