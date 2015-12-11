@@ -1,0 +1,6 @@
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\bin\meeting.dll.config
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\bin\meeting.dll
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\bin\meeting.pdb
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\obj\Debug\meeting.csprojResolveAssemblyReference.cache
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\obj\Debug\meeting.dll
+C:\client-shared_web_jlync\ssi\webcomponent\meeting\meeting\obj\Debug\meeting.pdb

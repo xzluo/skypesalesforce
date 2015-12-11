@@ -1,0 +1,133 @@
+﻿<!DOCTYPE html>
+
+<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+<head style="background-color:lightgrey">
+    <meta charset="utf-8" />
+    <title>SkypeWeb SDK Prototype</title>
+
+    <script src="../libs/skypeweb.js"></script>
+        <!-- SkypeWebSDK Bootstrap Libray -->
+    <script src="https://swx.cdn.skype.com/shared/v/1.1.23.0/SkypeBootstrap.min.js"></script>
+
+    <!-- Load Bootstrap -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
+
+
+    <!-- Javascript used in this demonstration -->
+
+     <script data-main="app.config.js" src="../libs/require.js"></script>
+    <script src="view.js"></script>
+    <!-- Styles for this demonstration -->
+    <link href="index.css" rel="stylesheet">
+</head>
+
+<body style="background-color:deepskyblue">
+    <div class="container">
+        <h2>SfB Web Component for Salesforce </h2>
+        <div class="row">
+            <div class="col-md-6">
+                    <div id="signin" class="button">Sign In</div>
+                    <div id="implicitsignin" class="button">Implicit Sign In</div>
+                </div>
+
+                <div id="whoami" class="button">Who Am I</div>
+                <div id="getcontacts" class="button">Get My Contacts</div> 
+                <div id="pullcontacts" class="button">Show People Card</div>
+                <div id="schedulemeeting" class="button">Create Meeting</div>
+                <div id="signout" class="button">Sign Out</div>
+                <div class="container container-fluid">
+                    <div class="row" id="peoplecards"></div>
+                </div>
+
+
+                <div class="userdetails" id="userdetails">
+
+                    <div class="row">
+                        <div class="col-md-4"><div>My Title</div></div>
+                        <div class="col-md-6"><div id="label_title"></div></div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4"><div>My DisplayName</div></div>
+                        <div class="col-md-8"><div id="label_displayName"></div></div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-4"><div>My Image</div></div>
+                        <div class="col-md-8"><div id="label_avatarUrl"></div></div>
+                    </div>
+
+                    <br />
+
+                </div>
+
+                <!--<div class="container" id="thedashboard">-->
+
+                    <div class="row" id="dashboardoutput">
+                       
+                    </div>
+
+                    <div class="container container-fluid" style="color:aqua" id="header">
+                        <div class="row" id="cards">
+                        </div>
+                    </div>
+
+                    <!--<div class="row">
+                        <div class="col-md-12" id="updatelabel"></div>
+                    </div>
+                </div>-->
+
+                <div class="contactdetails" id="contactdetails">
+
+
+
+                    <div class="row">
+                        <!--<div class="col-md-4"><div>Presence</div></div>-->
+                        <div class="col-md-6"><div id="contact_presence"></div></div>
+                    </div>
+
+                    <div class="row">
+                        <!--<div class="col-md-4"><div>Presence Image</div></div>-->
+                        <div class="col-md-8"><div id="contact_image"></div></div>
+                    </div>
+
+
+                    <div class="row">
+                        <!--<div class="col-md-4"><div>Presence DisplayName</div></div>-->
+                        <div class="col-md-8"><div id="contact_displayName"></div></div>
+                    </div>
+
+                    
+                    <br />
+
+                </div>
+
+                <div class="createMeeting" id="createMeeting">
+
+                    <h2>Create A Skype Meeting</h2>
+
+                    <div id="MeetingDetails">
+                        <div>Title</div>
+                        <div id="MeetingTitle" contenteditable="true" class="input form-control"></div>
+                     
+                        <div class="row">
+                            <div class="col-md-4"><div>Start Date</div><input id="sdate" name="sdate" type="date"></div>
+                            <div class="col-md-8"><div>End Date</div><input id="edate" name="edate" type="date"></div>
+                        </div>
+
+                        <div class="row">
+                            <div class="col-md-4"><div>Start Time</div><input id="stime" name="stime" type="time"></div>
+                            <div class="col-md-8"><div>End Time</div><input id="etime" name="etime" type="time"></div>
+                        </div>
+                        <div>Add Participant</div>
+                        <div id="participant" contenteditable="true" class="input form-control"></div>
+
+                        <br />
+                        <div id="create" class="button">Create</div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+</body>
+</html>
