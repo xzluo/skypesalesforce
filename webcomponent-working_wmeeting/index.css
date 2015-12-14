@@ -1,0 +1,38 @@
+﻿.body {
+    background-color: deepskyblue;
+}
+
+.input{
+    border: 1pt solid gray;
+    padding: 2pt;
+    overflow: hidden;
+}
+
+.header {
+    background-color:black;
+    color:white;
+    text-align:center;
+    padding:5px;
+}
+
+
+.button{
+    border: 1pt solid gray;
+    cursor: pointer;
+    padding: 2pt;
+    display: inline-block;
+    background-color : dodgerblue
+}
+
+.butto:hover{
+    background: lightgray;
+}
+
+.signinframe >. button{
+    margin-top: 8pt;
+}
+
+.userdetails{
+    border: 1pt solid lightgray;
+    padding:5px
+}
