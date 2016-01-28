@@ -1,13 +1,13 @@
 ﻿<!DOCTYPE html>
 
 <html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+
 <head style="background-color:lightgrey">
     <meta charset="utf-8" />
     <title>SkypeWeb SDK Prototype</title>
 
-    <script src="../libs/jlync/target/skypeweb.js"></script>
-        <!-- SkypeWebSDK Bootstrap Libray -->
-    <script src="https://swx.cdn.skype.com/shared/v/1.1.23.0/SkypeBootstrap.min.js"></script>
+    <!-- SkypeWebSDK Bootstrap Libray -->
+    <script src="//swx.cdn.skype.com/shared/v/1.2.9/SkypeBootstrap.js"></script>
 
     <!-- Load Bootstrap -->
     <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.5/css/bootstrap.min.css">
@@ -15,82 +15,50 @@
 
     <!-- Javascript used in this demonstration -->
 
-     <script data-main="app.config.js" src="../libs/require.js"></script>
-    <script src="view.js"></script>
+    <script data-main="app.config.js" src="../libs/require.js"></script>
+    <!--<script src="view.js"></script>-->
     <!-- Styles for this demonstration -->
-    <script src="index.js"></script>
-    <script src="skypeweb.js"></script>
-    <script src="jquery.js"></script>
-   
+    <!--<script src="app.js"></script>-->
+    <script src="../libs/jquery.js"></script>
+
     <link href="index.css" rel="stylesheet">
 </head>
 
 <body style="background-color:white">
     <div class="container">
+        <!--Configurable values are added-->
         <input id="owaControlurl" type="hidden" value="https://outlook.office.com/owa/?">
         <input id="owaVersion" type="hidden" value="16.1066.6.1892586">
         <input id="owaServerversion" type="hidden" value="16.1014.18.1870576">
         <input id="owaPath" type="hidden" value="cf=0&vC=1&forceBO=false#path=/calendar/view/Month">
 
-
-
-
-        <img src="skypeforb - Copy.jpg" alt="Mountain View" style="width:75px;height:75px;"><b>SFB Web Component for Salesforce </b></img>
+        <img src="sfb.jpg" alt="Mountain View" style="width:75px;height:75px;"><b>SFB Web Component for Salesforce </b>
         <br />
         <br />
         <div class="row">
             <div class="col-md-6">
                 <div id="loginbox">
-                    <!--<div>Login</div>
-                    <div id="address" contenteditable="true" class="input form-control"></div>
-                    <div>Password</div>
-                    <input type="password" id="password" name="password" class="input form-control" />-->
                     <div id="signin" class="button">Sign In</div>
                     <div id="implicitsignin" class="button">Implicit Sign In</div>
                     <div class="signinframe">
-                        <!--<div>
-                            <h3>Login:</h3>
-                        </div>
-                        <div>Tab Id</div>
-                        <div id="tabId" contenteditable="true" class="input">9b0fdb2a252c4aca56847b17d11c5e5a</div>
-                        <div>
-                            <span class="enabled"><input type="radio" name="auth" value="implicit" checked="checked">implicit</span>
-                        </div>-->
-                        <!--<div id="signIn" class="button enabled">SignIn</div>
-                        <div id="signOut" class="button enabled">SignOut</div>-->
                         <br />
-                        <!--<div id="applicationState">SignedOut</div>-->
-                        <!--<select id="myAvailability" class="disabled">
-                            <option value="Online">Online</option>
-                            <option value="Busy">Busy</option>
-                            <option value="BeRightBack">BeRightBack</option>
-                            <option value="Away">Away</option>
-                            <option value="DoNotDisturb">DoNotDisturb</option>
-                            <option value="Reset" selected="selected">Reset ...</option>
-                        </select>-->
                         <hr />
                     </div>
 
-
                 </div>
-
                 <div id="whoami" class="button">Who Am I</div>
                 <div id="getcontacts" class="button">Get My Contacts</div>
                 <div id="pullcontacts" class="button">Show People Card</div>
                 <div id="skypemeeting" class="button" onclick="OnButtonClick()">Skype Meeting</div>
-
-                <!--<div id="popupsaveschedulemeeting" class="button" onclick="myPopup()">Schedule Meeting (Popup)</div>
-                <br />
-                <div>
-                    <a id="saveschedulemeeting" href="https://outlook.office.com/owa/?ver=16.1027.13.1880268&cver=16.1027.13.1880268&cf=1&vC=0&forceBO=false#viewmodel=IComposeCalendarItemViewModelFactory&wid=85&ispopout=1&path" class="button">Schedule Meeting (Same tab)</a>
-                </div>
-                <br />-->
-
                 <div id="signout" class="button">Sign Out</div>
                 <div class="row">
-                    <div class="clearfix"><br /></div>
+                    <div class="clearfix">
+                        <br />
+                    </div>
                     <div class="col-md-12">
-                        <div id="logging_box" contenteditable="false" class="code small"><b>Event Logs<br /></b></div>
+                        <div id="logging_box" contenteditable="false" class="code small">
+                            <b>Event Logs<br /></b>
+                        </div>
                     </div>
                 </div>
                 <div class="container container-fluid">
@@ -100,28 +68,36 @@
 
                 <div class="userdetails" id="userdetails">
 
-
-
                     <div class="row">
-                        <div class="col-md-4"><div>My Title</div></div>
-                        <div class="col-md-6"><div id="label_title"></div></div>
+                        <div class="col-md-4">
+                            <div>My Title</div>
+                        </div>
+                        <div class="col-md-6">
+                            <div id="label_title"></div>
+                        </div>
                     </div>
 
                     <div class="row">
-                        <div class="col-md-4"><div>My DisplayName</div></div>
-                        <div class="col-md-8"><div id="label_displayName"></div></div>
+                        <div class="col-md-4">
+                            <div>My DisplayName</div>
+                        </div>
+                        <div class="col-md-8">
+                            <div id="label_displayName"></div>
+                        </div>
                     </div>
 
                     <div class="row">
-                        <div class="col-md-4"><div>My Image</div></div>
-                        <div class="col-md-8"><div id="label_avatarUrl"></div></div>
+                        <div class="col-md-4">
+                            <div>My Image</div>
+                        </div>
+                        <div class="col-md-8">
+                            <div id="label_avatarUrl"></div>
+                        </div>
                     </div>
 
                     <br />
 
                 </div>
-
-                <!--<div class="container" id="thedashboard">-->
 
                 <div class="row" id="dashboardoutput">
 
@@ -132,38 +108,27 @@
                     </div>
                 </div>
 
-                <!--<div class="row">
-                        <div class="col-md-12" id="updatelabel"></div>
-                    </div>
-                </div>-->
-
                 <div class="contactdetails" id="contactdetails">
 
-
-
                     <div class="row">
-                        <!--<div class="col-md-4"><div>Presence</div></div>-->
-                        <div class="col-md-6"><div id="contact_presence"></div></div>
+                        <div class="col-md-6">
+                            <div id="contact_presence"></div>
+                        </div>
                     </div>
 
                     <div class="row">
-                        <!--<div class="col-md-4"><div>Presence Image</div></div>-->
-                        <div class="col-md-8"><div id="contact_image"></div></div>
+                        <div class="col-md-8">
+                            <div id="contact_image"></div>
+                        </div>
                     </div>
-
 
                     <div class="row">
-                        <!--<div class="col-md-4"><div>Presence DisplayName</div></div>-->
-                        <div class="col-md-8"><div id="contact_displayName"></div></div>
+                        <div class="col-md-8">
+                            <div id="contact_displayName"></div>
+                        </div>
                     </div>
-
-
                     <br />
-
                 </div>
-
-                <!--<input type="button" oncontextmenu="="alert('Testing Mouseover and click'); return false" value="RightClick"/>-->
-
 
                 <div class="createMeeting" id="createMeeting">
 
@@ -172,34 +137,41 @@
                     <div id="MeetingDetails">
                         <div>Subject</div>
 
-                        <!--<div id="MeetingTitle" contenteditable="true" class="input form-control"><input type="text" id="myText" value="Mickey"></div>-->
-
                         <input type="text" id="txtname" size="55" />
 
-                        <!--<input type="button" id="btnsubmit" onclick="OnButtonClick()" value="Submit" />-->
 
                         <div class="row">
 
 
-                            <div class="col-md-4"><div>Start Date</div><input id="sdate" name="sdate" type="date" class="input form-control"></div>
-                            <div class="col-md-8"><div>End Date</div><input id="edate" name="edate" type="date" class="input form-control"></div>
+                            <div class="col-md-4">
+                                <div>Start Date</div>
+                                <input id="sdate" name="sdate" type="date" class="input form-control">
+                            </div>
+                            <div class="col-md-8">
+                                <div>End Date</div>
+                                <input id="edate" name="edate" type="date" class="input form-control">
+                            </div>
                         </div>
 
                         <div class="row">
 
-                            <div class="col-md-4"><div>Start Time</div><input id="stime" name="stime" type="time" class="input form-control"></div>
-                            <div class="col-md-8"><div>End Time</div><input id="etime" name="etime" type="time" class="input form-control"></div>
+                            <div class="col-md-4">
+                                <div>Start Time</div>
+                                <input id="stime" name="stime" type="time" class="input form-control">
+                            </div>
+                            <div class="col-md-8">
+                                <div>End Time</div>
+                                <input id="etime" name="etime" type="time" class="input form-control">
+                            </div>
                         </div>
                         <br />
 
 
                     </div>
                     <div>
-                        <div id="save" class="button button1" onclick="displayOutput()">Save</div>
+                        <div id="save" class="button button1" onclick="myOnlinemeetingurl()">Save</div>
                         <div id="popupsaveschedulemeeting" class="button button1">Schedule</div>
-                        <!--<div id="sametabschedulemeeting" onclick="myPopup()" class="button button1">Schedule (Same tab)</div>-->
-                        <!-- <div id="sametabschedulemeeting" href="https://outlook.office.com/owa/?ver=16.1027.13.1880268&cver=16.1027.13.1880268&cf=1&vC=0&forceBO=false#viewmodel=IComposeCalendarItemViewModelFactory&wid=85&ispopout=1&path" class="button button1">Schedule (Same tab)</div> -->
-                        <!--<a id="sametabschedulemeeting" href="https://outlook.office.com/owa/?ver=16.1027.13.1880268&cver=16.1027.13.1880268&cf=1&vC=0&forceBO=false#viewmodel=IComposeCalendarItemViewModelFactory&wid=85&ispopout=1&path" class="button button1">Schedule (Same tab)</a>-->
+
 
 
                     </div>
@@ -208,9 +180,6 @@
                 <div class="saveMeetingEvents" id="saveMeetingEvents">
 
                     <h2>Next Steps</h2>
-
-                    <!--<h1 id="result">JavaScript Example</h1>-->
-                    <!--<td><img src="nextevent.jpg" alt="Mountain View" style="width:50px;height:100px;"><b></b></td>-->
 
 
                     <table style="display: inline-block; float: left; ">
@@ -226,7 +195,9 @@
                                         <td id="saveMeetingEvents_meetingsubject" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri; font-weight: bold"></td>
                                     </tr>
                                     <tr>
-                                        <td id="saveMeetingEvents_meetingonlineurl" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri"><a href="https://meet.lync.com/microsoft/lyncdfee/4ASI4GBS" style="display: block; color: #00AFF0; font-family: Calibri">Join Online Skype Meeting</a></td>
+                                        <td id="saveMeetingEvents_meetingonlineurl" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri">
+                                            <a id="mySchedulemeetingonlineurl" href="" style="display: block; color: #00AFF0; font-family: Calibri">Join Online Skype Meeting</a>
+                                        </td>
                                     </tr>
 
                                 </table>
@@ -243,73 +214,11 @@
                         </tr>
                     </table>
 
-                    <!--<table style="display: inline-block; float: left; ">
-                        <tr>
-
-                            <td id="saveMeetingEvents_meetingsubject" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri; font-weight: bold"></td>
-                        </tr>
-                        <tr>
-                            <td id="saveMeetingEvents_meetingonlineurl"  style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri" ><a href="https://meet.lync.com/microsoft/lyncdfee/4ASI4GBS" style="display: block; color: #00AFF0; font-family: Calibri">Join Online Skype Meeting</a></td>
-                        </tr>
-
-                    </table>
-                    <table style="display: inline-block; float: left; ">
-                        <tr>
-                            <td id="saveMeetingEvents_startdate" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri"></td>
-                            <td id="saveMeetingEvents_starttime" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri"></td>
-                            <td id="saveMeetingEvents_enddate" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri"></td>
-                            <td id="saveMeetingEvents_endtime" style="padding-left: 5px; padding-bottom: 3px; color: #00AFF0; font-family: Calibri"></td>
-                        </tr>
-
-                    </table>-->
-
-                    <script>
-                        function displayOutput() {
-                            var meetingsubjectInput = document.getElementById("txtname").value;
-                            document.getElementById("saveMeetingEvents_meetingsubject").innerHTML = meetingsubjectInput;
-
-                            var meetingstartdate = document.getElementById("sdate").value;
-                            document.getElementById("saveMeetingEvents_startdate").innerHTML = meetingstartdate;
-
-                            var meetingstarttime = document.getElementById("stime").value;
-                            document.getElementById("saveMeetingEvents_starttime").innerHTML = meetingstarttime;
-
-                            var meetingenddate = document.getElementById("edate").value;
-                            document.getElementById("saveMeetingEvents_enddate").innerHTML = meetingenddate;
-
-                            var meetingendtime = document.getElementById("etime").value;
-                            document.getElementById("saveMeetingEvents_endtime").innerHTML = meetingendtime;
-
-
-
-                        }
-                    </script>
-
-
-
-
-
-                    </img>
-
-
-
-
-
                 </div>
-
-
-
 
             </div>
         </div>
-
-        <script>
-
-
-        </script>
-
         <script type="text/javascript">
-
             function OnButtonClick() {
                 var textcontrol = document.getElementById("txtname");
                 textcontrol.value = "Skype Meeting: Tesla CloudHub + Anypoint Connectors";
@@ -336,10 +245,7 @@
             }
         </script>
 
-
-
+        </div>
 </body>
-
-
 
 </html>

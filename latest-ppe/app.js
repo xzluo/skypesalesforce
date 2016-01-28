@@ -43,22 +43,39 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         var enddt = meetingendDate + "T14%3a00%3a00";
         var location = "Skype Meeting";
         var body = "This+is+the+body+%3cb%3ebold%3c%2fb%3e%3cbr%2f%3e%3cbr%2f%3e%3cfont+size%3d%22%2b3%22%3e%3cb%3e%3ca+href%3d%22http%3a%2f%2fmeet.skype.com%2fmymeeting123%22%3eJoin+Skype+Meeting%3c%2fa%3e%3c%2fb%3e%3c%2ffont%3e&wa=wsignin1.0";
-        // var part1 = "https://outlook.office.com/owa/?ver=16.1066.6.1892586&cver=16.1014.18.1870576&cf=0&vC=1&forceBO=false#path=/calendar/view/Month";
         var part1 = owaControlurl + "ver=" + owaVersion + "&" + "cver=" + owaServerversion + "&" + owaPath
-
         var owaMeetingURL = part1 + "&" + "Subject=" + subject + "&" + "startdt=" + startdt + "&" + "enddt=" + enddt + "&" + "location=" + location + "&" + "isPopout=1&" + "body=" + body;
-
         log(owaMeetingURL);
-
-
-
         var myWindow = window.open
             (owaMeetingURL,
             "_blank", "toolbar=yes, scrollbars=yes, resizable=yes, top=500, left=500, width=1200, height=800");
-
-
     }
 
+    function displayOutput(str) {
+
+        var meetingsubjectInput = document.getElementById("txtname").value;
+        document.getElementById("saveMeetingEvents_meetingsubject").innerHTML = meetingsubjectInput;
+
+        var meetingstartdate = document.getElementById("sdate").value;
+        document.getElementById("saveMeetingEvents_startdate").innerHTML = meetingstartdate;
+
+        var meetingstarttime = document.getElementById("stime").value;
+        document.getElementById("saveMeetingEvents_starttime").innerHTML = meetingstarttime;
+
+        var meetingenddate = document.getElementById("edate").value;
+        document.getElementById("saveMeetingEvents_enddate").innerHTML = meetingenddate;
+
+        var meetingendtime = document.getElementById("etime").value;
+        document.getElementById("saveMeetingEvents_endtime").innerHTML = meetingendtime;
+
+        myOnlinemeetingurl(str);
+    }
+
+    function myOnlinemeetingurl(str) {
+        document.getElementById('mySchedulemeetingonlineurl').innerHTML = "Join Online Skype Meeting";
+        document.getElementById('mySchedulemeetingonlineurl').href = str;
+    }
+    
     var App = (function () {
         function App(){}
         
@@ -79,22 +96,18 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         var Application
         var client;
 
-        //Skype.initialize({
-        //    apiKey: 'SWX-BUILD-SDK',
-        //}, function (api) {
-        //    Application = api.application;
-        //    client = new Application();
-        //}, function (err) {
-        //    log('some error occurred: ' + err);
-        //});
-
-        Application = Skype.Web.Model.Application;
-
-        client = new Application();
+        Skype.initialize({
+            apiKey: 'a42fcebd-5b43-4b89-a065-74450fb91255',
+        }, function (api) {
+            Application = api.application;
+            client = new Application();
+        }, function (err) {
+            log('some error occurred: ' + err);
+        });
 
         log("Client Created");
 
-        // when the user clicks the "Sign In" button
+        // SIGN IN FLOW
         $('#signin').click(function () {
             $('#signin').hide();
             log('Signing in...');
@@ -125,18 +138,14 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             }
             
              AuthModule_1.default.instance.refreshToken(function (error, token) {
-             log("AAD TOKEN IS:::::::::" + token);
                var origins = [
                       'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
                       'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
                       'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root',
                       'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root'
                   ];
-                  
 
-           // var origins = ['https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',];
-
-                    function auth(req, send) {
+               function auth(req, send) {
                         if (req.url.match(/https:\/\/webdir0d/)) {
                             req.headers['Authorization'] = 'Bearer ' + token.trim();
                         } else if (req.url.match(/https:\/\/webpoolbn10m03/)) {
@@ -161,8 +170,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
              });
         });
 
-
-        // when the user clicks the "Sign In" button
+        // IMPLICIT FLOW
         $('#implicitsignin').click(function () {
 
             $('#signin').hide();
@@ -178,22 +186,16 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root',
                 'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root'
             ];
-            
-            //var origins = ['https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',];
-
+ 
 
             var options = {
                 id: '9b0fdb2a252c4aca56847b17d11c5e5a',
-                // client_id: 'e48d4214-364e-4731-b2b6-47dabf529218',
                 client_id: 'c050aba1-6509-4a0a-81f9-7ec4c0667010',
                 //oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=microsoft.com',
                 oauth_uri: 'https://login.windows-ppe.net/common/oauth2/authorize?domain_hint=lyncnadbr.ccsctp.net',
                 origins: origins,
-                //use_cwt: true,
-                //enableInternalNS: false,
             }
 
-            log("before function");
             log(client.personsAndGroupsManager.mePerson.displayName);
             client.signInManager.signIn(options).then(function () {
                 log('Signed in as ' + client.personsAndGroupsManager.mePerson.displayName());
@@ -211,13 +213,11 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
 
         });
 
-        // when the user clicks on the "Who AM I" button
+        // GIVES BASIC INFO ABOUT SIGNED IN USER
         $('#whoami').click(function () {
             $('#userdetails').show();
             var me = client.personsAndGroupsManager.mePerson;
-            log("Looking for title...");
             me.title.get().then(function (value) {
-                log(value);
                 $('#label_title').text(value);
             });
 
@@ -233,7 +233,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             });
         });
 
-        // when the user clicks on the "Pull My Contacts" button
+        // SHOWS PEOPLE CARD CONTACTS ASSOCIATED WITH SIGNED IN USER
         $("#pullcontacts").click(function () {
 
             log('Retrieving all contacts...');
@@ -288,6 +288,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             //});
         });
 
+        // SHOWS CONTACTS ASSOCIATED WITH SIGNED IN USER
         $('#getcontacts').click(function () {
 
             log("Looking for all contacts");
@@ -304,7 +305,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             });
         });
 
-
+        // CLICK SKYPE MEETING
         $('#skypemeeting').click(function () {
             $('#createMeeting').show();
             if (client) {
@@ -318,30 +319,30 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         });
 
 
-        function OnButtonClick() {
-            var textcontrol = document.getElementById("txtname");
-            textcontrol.value = tempSubjectTitle;
+        //function OnButtonClick() {
+        //    var textcontrol = document.getElementById("txtname");
+        //    textcontrol.value = tempSubjectTitle;
 
-            var today = new Date();
-            var dd = today.getDate();
-            var mm = today.getMonth() + 1; //January is 0!
-            var yyyy = today.getFullYear();
+        //    var today = new Date();
+        //    var dd = today.getDate();
+        //    var mm = today.getMonth() + 1; //January is 0!
+        //    var yyyy = today.getFullYear();
 
-            if (dd < 10) {
-                dd = '0' + dd
-            }
+        //    if (dd < 10) {
+        //        dd = '0' + dd
+        //    }
 
-            if (mm < 10) {
-                mm = '0' + mm
-            }
+        //    if (mm < 10) {
+        //        mm = '0' + mm
+        //    }
 
-            today = mm + '/' + dd + '/' + yyyy;
-            // document.write(today);
-            // textcontrol.value = today;
+        //    today = mm + '/' + dd + '/' + yyyy;
+        //    // document.write(today);
+        //    // textcontrol.value = today;
 
-            var sdate = document.getElementById("sdate");
-            //sdate.value = today;
-        }
+        //    var sdate = document.getElementById("sdate");
+        //    //sdate.value = today;
+        //}
 
         function getMeetingOptions() {
             var options = {
@@ -416,20 +417,18 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             return options;
         }
 
-
+        // CLICK SAVE BUTTON
         $('#save').click(function () {
             if (client && meeting) {
 
                 $('#saveMeetingEvents').show();
 
-                //log(sdate);
-                //log(edate);
-
                 //Updating Meeting subject modified by the user
                 var meetingSubject = document.getElementById('txtname');
                 var updatemeetingSubject = function () {
                 }
-                //log(meetingSubject.value + "***I SAVE THIS SUBJECT****");
+
+                log(meetingSubject.value + "***I SAVE THIS SUBJECT****");
 
                 if (meetingSubject.addEventListener) {
                     meetingSubject.addEventListener('keyup', function () {
@@ -438,13 +437,11 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-
-
                 //Updating Meeting Start Date modified by the user
                 var meetingstartDate = document.getElementById('sdate');
                 var updatemeetingstartDate = function () {
                 }
-                //log(meetingstartDate.value + "***I SAVE THIS START DATE****");
+                  log(meetingstartDate.value + "***I SAVE THIS START DATE****");
 
                 if (meetingstartDate.addEventListener) {
                     meetingstartDate.addEventListener('keyup', function () {
@@ -452,13 +449,11 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-
-
                 //Updating Meeting End Date modified by the user
                 var meetingendDate = document.getElementById('edate');
                 var updatemeetingendDate = function () {
                 }
-                //log(meetingendDate.value + "***I SAVE THIS END DATE****");
+                log(meetingendDate.value + "***I SAVE THIS END DATE****");
 
                 if (meetingendDate.addEventListener) {
                     meetingendDate.addEventListener('keyup', function () {
@@ -470,7 +465,8 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 var meetingstartTime = document.getElementById('stime');
                 var updatemeetingstartTime = function () {
                 }
-                //log(meetingstartTime.value + "***I SAVE THIS START TIME****");
+                log(meetingstartTime.value + "***I SAVE THIS START TIME****");
+
 
                 if (meetingstartTime.addEventListener) {
                     meetingstartTime.addEventListener('keyup', function () {
@@ -482,7 +478,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 var meetingendTime = document.getElementById('etime');
                 var updatemeetingendTime = function () {
                 }
-                //log(meetingendTime.value + "***I SAVE THIS END TIME****");
+                log(meetingendTime.value + "***I SAVE THIS END TIME****");
 
                 if (meetingendTime.addEventListener) {
                     meetingendTime.addEventListener('keyup', function () {
@@ -490,28 +486,22 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-                //myPopup(meetingSubject.value);
-
-                //status("Joining meeting: " + meeting.onlineMeetingUri());
-                //status("Join URL: " + meeting.joinUrl());
-                //log("Joining meeting: " + meeting.onlineMeetingUri());
-                //log("Join URL: " + meeting.joinUrl());
                 $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
                 //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
                 var str = meeting.joinUrl();
                 var onlineMeetingURL = str.link(meeting.joinUrl());
                 $('#dashboardoutput').append(onlineMeetingURL);
 
+                displayOutput(str);
+       
             }
         });
 
+        //CLICK SCHEDULE BUTTON
         $('#popupsaveschedulemeeting').click(function () {
             if (client && meeting) {
 
                 $('#saveMeetingEvents').show();
-
-                //log(sdate);
-                //log(edate);
 
                 //Updating Meeting subject modified by the user
                 var meetingSubject = document.getElementById('txtname');
@@ -526,8 +516,6 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-
-
                 //Updating Meeting Start Date modified by the user
                 var meetingstartDate = document.getElementById('sdate');
                 var updatemeetingstartDate = function () {
@@ -539,8 +527,6 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                         updatemeetingstartDate();
                     });
                 }
-
-
 
                 //Updating Meeting End Date modified by the user
                 var meetingendDate = document.getElementById('edate');
@@ -580,19 +566,15 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
 
                 myPopup(meetingSubject.value, meetingstartDate.value, meetingendDate.value);
 
-                //status("Joining meeting: " + meeting.onlineMeetingUri());
-                //status("Join URL: " + meeting.joinUrl());
-                //log("Joining meeting: " + meeting.onlineMeetingUri());
-                //log("Join URL: " + meeting.joinUrl());
-                //$('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
-                ////  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
-                //var str = meeting.joinUrl();
-                //var onlineMeetingURL = str.link(meeting.joinUrl());
-                //$('#dashboardoutput').append(onlineMeetingURL);
+                $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
+                //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
+                var str = meeting.joinUrl();
+                var onlineMeetingURL = str.link(meeting.joinUrl());
+                $('#dashboardoutput').append(onlineMeetingURL);
+                displayOutput(str);
 
             }
         });
-
 
         // when the user clicks on the "Sign Out" button
         $('#signout').click(function () {
