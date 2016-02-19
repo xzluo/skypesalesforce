@@ -30,18 +30,23 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         return true;
     }
     
-    function myPopup(meetingSubject, meetingstartDate, meetingendDate) {
+    function myPopup(meetingSubject, meetingstartDate, meetingendDate, meetingstartTime, meetingendTime) {
 
-        log("passing" + meetingSubject);
+        //log("passing" + meetingSubject);
+        //$('#dashboardoutput').append(meetingSubject + "<br>");
+        //$('#dashboardoutput').append(meetingstartDate + "<br>");
+        //$('#dashboardoutput').append(meetingendDate + "<br>");
+        //$('#dashboardoutput').append(meetingstartTime + "<br>");
+        //$('#dashboardoutput').append(meetingendTime + "<br>");
 
         var subject = meetingSubject;
         var owaControlurl = document.getElementById("owaControlurl").value;
         var owaVersion = document.getElementById("owaVersion").value;
         var owaServerversion = document.getElementById("owaServerversion").value;
         var owaPath = document.getElementById("owaPath").value;
-        var startdt = meetingstartDate + "T13%3a00%3a00";
-        var enddt = meetingendDate + "T14%3a00%3a00";
-        var location = "Skype Meeting";
+        var startdt = meetingstartDate + meetingstartTime;
+        var enddt = meetingendDate + meetingendTime;
+        var location = encodeURIComponent("Online Skype Meeting");
         var body = "This+is+the+body+%3cb%3ebold%3c%2fb%3e%3cbr%2f%3e%3cbr%2f%3e%3cfont+size%3d%22%2b3%22%3e%3cb%3e%3ca+href%3d%22http%3a%2f%2fmeet.skype.com%2fmymeeting123%22%3eJoin+Skype+Meeting%3c%2fa%3e%3c%2fb%3e%3c%2ffont%3e&wa=wsignin1.0";
         var part1 = owaControlurl + "ver=" + owaVersion + "&" + "cver=" + owaServerversion + "&" + owaPath
         var owaMeetingURL = part1 + "&" + "Subject=" + subject + "&" + "startdt=" + startdt + "&" + "enddt=" + enddt + "&" + "location=" + location + "&" + "isPopout=1&" + "body=" + body;
@@ -101,11 +106,12 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         }, function (api) {
             Application = api.application;
             client = new Application();
+            log("Client Created");
         }, function (err) {
-            log('some error occurred: ' + err);
+            log('some error occurred: failed' + err);
         });
 
-        log("Client Created");
+
 
         // SIGN IN FLOW
         $('#signin').click(function () {
@@ -199,17 +205,24 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             log(client.personsAndGroupsManager.mePerson.displayName);
             client.signInManager.signIn(options).then(function () {
                 log('Signed in as ' + client.personsAndGroupsManager.mePerson.displayName());
+            }).then(null, function (error) {
+                log("Cannot sign in");
             });
 
-            log("completed");
-            $('#loginbox').hide();
-            $('#signout').show();
-            $('#whoami').show();
-            $('#pullcontacts').show();
-            $('#getcontacts').show();
-            $('#skypemeeting').show();
-            $('#saveschedulemeeting').show();
-            $('#popupsaveschedulemeeting').show();
+          
+            //$(window).load(function () {
+            //    $("#loader").fadeOut("fast");
+                log("completed");
+                $('#loginbox').hide();
+                $('#signout').show();
+                $('#whoami').show();
+                $('#pullcontacts').show();
+                $('#getcontacts').show();
+                $('#skypemeeting').show();
+                $('#saveschedulemeeting').show();
+                $('#popupsaveschedulemeeting').show();
+            //});
+            
 
         });
 
@@ -309,10 +322,11 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         $('#skypemeeting').click(function () {
             $('#createMeeting').show();
             if (client) {
+                log("Schedule meeting");
                 var options = getMeetingOptions();
 
-                client.scheduleMeeting(options).then(function (m) {
-
+               // client.scheduleMeeting(options).then(function (m) {
+                client.startMeeting(options).then(function (m) {
                     meeting = m;
                 });
             }
@@ -486,10 +500,10 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-                $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
+               // $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
                 //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
-                var str = meeting.joinUrl();
-                var onlineMeetingURL = str.link(meeting.joinUrl());
+                var str = meeting.meeting.joinUrl();
+                var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
                 $('#dashboardoutput').append(onlineMeetingURL);
 
                 displayOutput(str);
@@ -564,7 +578,15 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                     });
                 }
 
-                myPopup(meetingSubject.value, meetingstartDate.value, meetingendDate.value);
+                //$('#dashboardoutput').append(meetingSubject.value + "<br>");
+                //$('#dashboardoutput').append(meetingstartDate.value + "<br>");
+                //$('#dashboardoutput').append(meetingendDate.value + "<br>");
+                //$('#dashboardoutput').append(meetingstartTime.value + "<br>");
+                //$('#dashboardoutput').append(meetingendTime.value + "<br>");
+
+            
+
+                myPopup(encodeURIComponent(meetingSubject.value), encodeURIComponent(meetingstartDate.value), encodeURIComponent(meetingendDate.value), encodeURIComponent(meetingstartTime.value), encodeURIComponent(meetingendTime.value));
 
                 $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
                 //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
