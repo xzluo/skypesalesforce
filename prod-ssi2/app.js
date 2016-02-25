@@ -195,7 +195,7 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
  
 
             var options = {
-                // cors: true,
+                cors: true,
                 use_cwt: false,
                 redirect_uri: '/query.html',
                 id: '9b0fdb2a252c4aca56847b17d11c5e5a',
