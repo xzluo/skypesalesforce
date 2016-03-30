@@ -12,8 +12,9 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
                 throw new Error("Error: Instantiation failed: Use AuthModule.getInstance() instead of new.");
             }
             AuthModule.instance = this;
-        }
-        AuthModule.prototype.initialize = function () {
+
+            Logger_1.default.log("Auth module initialized");
+
             Logger_1.default.log('Initializing ADAL');
             // Set up logginf for Adal.js
             // Disabled until we get back to a version that supports it (1.0.6 or greater)
@@ -24,16 +25,41 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
                 tenant: Constants_1.default.AzureADTenant,
                 clientId: Constants_1.default.AzureClientId,
                 cacheLocation: 'localStorage',
-                redirectUri: window.location.origin,
+                redirectUri: window.location.href,
                 // resource: 'https://webdir0d.tip.lync.com'
-                resource: 'https://webdir.online.lync.com'
+                resource: 'https://outlook.office.com'
             });
-            Logger_1.default.log('Handling callback after login');
-            this.authContext.handleWindowCallback();
+
+            // Check For & Handle Redirect From AAD After Login
+            var isCallback = this.authContext.isCallback(window.location.hash);
+
+            if (isCallback) {
+                this.authContext.handleWindowCallback();
+                if (!this.authContext.getLoginError()) {
+                    window.location = this.authContext._getItem(this.authContext.CONSTANTS.STORAGE.LOGIN_REQUEST);
+
+                    this.authContext.acquireToken(Constants_1.default.AzureClientId, function (error, token) {
+                        if (error) {
+                            Logger_1.default.log('Failed to access id_token, err: ' + err);
+                            return;
+                        }
+
+                        Logger_1.default.log('Succeeded to access id_token, token: ' + atob(token.split('.')[1]));
+                    });
+                }
+            }
+        }
+        AuthModule.prototype.initialize = function () {
+            if (this.authContext === undefined || this.authContext === null) {
+                Logger_1.default.log("authContext initialized error");
+                return;
+            }
+
             // Trigger a login if the user is not authenticated.
             if (!this.authContext.getCachedUser()) {
                 this.authContext.login();
             }
+            //$httpProvider
         };
         /**
         * Gets the AAD token. It returns a cached token if there's one and it hasn't expired. Otherwise, it aquires a new token
@@ -42,12 +68,16 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
         AuthModule.prototype.refreshToken = function (tokenResponseFunction) {
             var _this = this;
             Logger_1.default.log('Check auth token');
-            if (!this.authContext) {
-                Logger_1.default.log('ADAL has not been set up. Doing it now.');
-                this.initialize();
+
+            if (!this.authContext.getCachedUser()) {
+                tokenResponseFunction("User is not logged in", null);
+                return;
             }
-            this.authContext.acquireToken(Constants_1.default.AzureClientId, function (error, token) {
+            // this.authContext.acquireToken(Constants_1.default.AzureClientId, function (error, token) {
+            this.authContext.acquireToken(Constants_1.default.ResourceUrl, function (error, token) {
                 Logger_1.default.log('Callback after acquiring token');
+
+                Logger_1.default.log('Succeeded to access access_token, token: ' + atob(token.split('.')[1]));
                 if (error || !token) {
                     Logger_1.default.error("Error acquiring token: " + error);
                 }
@@ -56,6 +86,7 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
                     if (_this.currentToken !== token) {
                         _this.currentToken = token;
                         Logger_1.default.info("New AAD token: " + token);
+                        Logger_1.default.info("AAD access token: " + _this.Accesstoken);
                     }
                 }
                 tokenResponseFunction(error, token);
@@ -114,6 +145,7 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
         AuthModule.instance = new AuthModule();
         return AuthModule;
     })();
+
     Object.defineProperty(exports, "__esModule", { value: true });
     exports.default = AuthModule;
 });

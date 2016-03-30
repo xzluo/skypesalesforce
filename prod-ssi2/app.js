@@ -114,10 +114,18 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
 
 
         // SIGN IN FLOW
+        $('#authorizeToOffice').click(function () {
+            Logger_1.default.log("authorizeToOffice: AuthModule_1.default.instance");
+            AuthModule_1.default.instance.refreshToken(function (error, token) {
+                Logger_1.default.log("AuthModule_1.default.instance.refreshToken");
+            });
+        });
+
         $('#signin').click(function () {
             $('#signin').hide();
             log('Signing in...');
-            
+            console.log("signin");
+
             // window.location.origin is not available in older versions of IE
             if (!window.location.origin) {
                 window.location.origin = window.location.protocol + "//" + window.location.hostname +
@@ -133,47 +141,51 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             }
             // Promises
             require('./libs/es6-promise.min').polyfill();
-            
+
             // ----------
             // Initialize the authentication module
             var isIframe = (window !== window.top);
+
             AuthModule_1.default.instance.initialize();
-              if (isIframe) {
+            console.log("AuthModule_1.default.instance.initialize");
+            console.log(AuthModule_1.default.instance);
+            if (isIframe) {
                 Logger_1.default.log('Running in an iframe, stoppig now.');
+                console.log('Running in an iframe, stoppig now.');
                 return;
             }
-            
-             AuthModule_1.default.instance.refreshToken(function (error, token) {
-               var origins = [
-                     // 'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
-                     // 'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
-                      'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root'
-                     // 'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root'
-                  ];
 
-               function auth(req, send) {
-                        if (req.url.match(/https:\/\/webdir0d/)) {
-                            req.headers['Authorization'] = 'Bearer ' + token.trim();
-                        } else if (req.url.match(/https:\/\/webpoolbn10m03/)) {
-                            req.headers['Authorization'] = 'Bearer ' + token.trim();
-                        } else {
-                            req.headers['Authorization'] = 'Bearer ' + token.trim();
-                        }
-                        log(req);
-                        return send(req);
-                    }
-                   
-                    client.signInManager.signIn({
-                      auth: auth,
-                        client_id: '3f303bbb-4d5f-45c2-ad2b-7034c16f38b6',
-                        //oauth_uri: '...',
-                        origins: origins,
-                        //use_cwt: true,
-                       // enableInternalNS: false,
-                    }).then(function () {
-                        log('Logged In Succesfully');
-                    });
-             });
+            //setTimeout(AuthModule_1.default.instance.refreshToken(function (error, token) {
+            //    var origins = [
+            //          // 'https://webdir.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+            //          // 'https://webdir0d.tip.lync.com/autodiscover/autodiscoverservice.svc/root',
+            //           'https://webdir.online.lync.com/autodiscover/autodiscoverservice.svc/root'
+            //          // 'https://webdir0m.online.lync.com/autodiscover/autodiscoverservice.svc/root'
+            //       ];
+
+            //    function auth(req, send) {
+            //             if (req.url.match(/https:\/\/webdir0d/)) {
+            //                 req.headers['Authorization'] = 'Bearer ' + token.trim();
+            //             } else if (req.url.match(/https:\/\/webpoolbn10m03/)) {
+            //                 req.headers['Authorization'] = 'Bearer ' + token.trim();
+            //             } else {
+            //                 req.headers['Authorization'] = 'Bearer ' + token.trim();
+            //             }
+            //             log(req);
+            //             return send(req);
+            //         }
+            //
+            //         client.signInManager.signIn({
+            //           auth: auth,
+            //             client_id: '3f303bbb-4d5f-45c2-ad2b-7034c16f38b6',
+            //             //oauth_uri: '...',
+            //             origins: origins,
+            //             //use_cwt: true,
+            //            // enableInternalNS: false,
+            //         }).then(function (data) {
+            //             log('Logged In Succesfully');
+            //         });
+            //  }), 5000);
         });
 
         // IMPLICIT FLOW
@@ -183,7 +195,8 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
             $('#implicitsignin').hide();
            
             log('Entering Implicit in...');
-
+            
+          
             var Application = Skype.Web.Model.Application;
             client = new Application();
           var origins = [
@@ -200,8 +213,10 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 redirect_uri: '/query.html',
                 id: '9b0fdb2a252c4aca56847b17d11c5e5a',
                 // client_id: 'c050aba1-6509-4a0a-81f9-7ec4c0667010',
-                client_id: '3f303bbb-4d5f-45c2-ad2b-7034c16f38b6',
-                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=danewman.onmicrosoft.com',
+                //client_id: '3f303bbb-4d5f-45c2-ad2b-7034c16f38b6', //Davi newman tenant id
+                //  oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=danewman.onmicrosoft.com',
+                client_id: '9de6b775-994c-44a2-973d-fd28189ccfaf', //ssiprod tenant expires 4/28/2016
+                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=ssiprod.onmicrosoft.com',
                 // oauth_uri: 'https://login.windows-ppe.net/common/oauth2/authorize?domain_hint=lyncnadbr.ccsctp.net',
                 origins: origins,
             }
@@ -325,15 +340,14 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         // CLICK SKYPE MEETING
         $('#skypemeeting').click(function () {
             $('#createMeeting').show();
-            if (client) {
+            //if (client) {
                 log("Schedule meeting");
                 var options = getMeetingOptions();
 
-               // client.scheduleMeeting(options).then(function (m) {
-                client.startMeeting(options).then(function (m) {
-                    meeting = m;
-                });
-            }
+                 //client.startMeeting(options).then(function (m) {
+                 //    meeting = m;
+                 //});
+
         });
 
 
@@ -437,8 +451,9 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
 
         // CLICK SAVE BUTTON
         $('#save').click(function () {
-            if (client && meeting) {
+            //if (client && meeting) {
 
+                //if ( meeting) {
                 $('#saveMeetingEvents').show();
 
                 //Updating Meeting subject modified by the user
@@ -506,17 +521,47 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
 
                // $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
                 //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
-                var str = meeting.meeting.joinUrl();
-                var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
-                $('#dashboardoutput').append(onlineMeetingURL);
+                //var str = meeting.meeting.joinUrl();
+                //var str = meeting.joinUrl.get();
+                //var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
+                //var onlineMeetingURL = meeting.joinUrl();
+                //meeting.onlineMeetingUri.get().then(function(onlineMeetingURL)
+                //{
+                //    $('#dashboardoutput').append(onlineMeetingURL);
+                //    displayOutput(onlineMeetingURL);
+                //});
+                
+                //var str = meeting.meeting.joinUrl();
+                //var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
+                //$('#dashboardoutput').append(onlineMeetingURL);
 
-                displayOutput(str);
-       
-            }
+               // var str = meeting.meeting.joinUrl();
+               //// var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
+               // $('#dashboardoutput').append(str);
+               // console.log("meeting url" + str);
+               // displayOutput(str);
+
+                var conf = client.conversationsManager.createMeeting();
+                conf.accessLevel("Everyone");
+                conf.subject(meetingSubject.value);
+                conf.joinUrl.get().then(function (res) {
+                    console.log("Meeting URL " + conf.joinUrl());
+                    var str = conf.joinUrl();
+                    $('#dashboardoutput').append(str);
+                    console.log("meeting url" + str);
+                    displayOutput(str);
+
+                }, function (err) {
+                    log("Falied to schedule meeting" + err);
+                });
+               
+               
+            //}
         });
 
         //CLICK SCHEDULE BUTTON
         $('#popupsaveschedulemeeting').click(function () {
+
             if (client && meeting) {
 
                 $('#saveMeetingEvents').show();
@@ -587,24 +632,251 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 //$('#dashboardoutput').append(meetingendDate.value + "<br>");
                 //$('#dashboardoutput').append(meetingstartTime.value + "<br>");
                 //$('#dashboardoutput').append(meetingendTime.value + "<br>");
+                
+                
+                
+                AuthModule_1.default.instance.refreshToken(function (error, token) {
+                    Logger_1.default.log("AuthModule_1.default.instance.refreshToken");
+                });
 
             
-
-                myPopup(encodeURIComponent(meetingSubject.value), encodeURIComponent(meetingstartDate.value), encodeURIComponent(meetingendDate.value), encodeURIComponent(meetingstartTime.value), encodeURIComponent(meetingendTime.value));
-
-                $('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
-                //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
-                var str = meeting.joinUrl();
-                var onlineMeetingURL = str.link(meeting.joinUrl());
+                var str = meeting.meeting.joinUrl();
+                var onlineMeetingURL = str.link(meeting.meeting.joinUrl());
                 $('#dashboardoutput').append(onlineMeetingURL);
+
                 displayOutput(str);
+
+                //myPopup(encodeURIComponent(meetingSubject.value), encodeURIComponent(meetingstartDate.value), encodeURIComponent(meetingendDate.value), encodeURIComponent(meetingstartTime.value), encodeURIComponent(meetingendTime.value));
+                //outlookSub(encodeURIComponent(meetingSubject.value));
+               
+                var xhttpPost = new XMLHttpRequest();
+         
+
+            var tempMeetingURL = "https://meet.lync.com/microsoft/aravin/M5LJHMG0";
+            var acquireToken = "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSIsImtpZCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSJ9.eyJhdWQiOiJodHRwczovL291dGxvb2sub2ZmaWNlLmNvbSIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzUzNDExYjhiLTFkZTgtNGQwMi05N2ZjLTcwMTBiYWQ1ZjIyNi8iLCJpYXQiOjE0NTc3Mjk3NjYsIm5iZiI6MTQ1NzcyOTc2NiwiZXhwIjoxNDU3NzMzNjY2LCJhY3IiOiIxIiwiYW1yIjpbInB3ZCJdLCJhcHBpZCI6IjNmMzAzYmJiLTRkNWYtNDVjMi1hZDJiLTcwMzRjMTZmMzhiNiIsImFwcGlkYWNyIjoiMCIsImZhbWlseV9uYW1lIjoiTmV3bWFuIiwiZ2l2ZW5fbmFtZSI6IkRhdmlkIiwiaXBhZGRyIjoiMTY3LjIyMC4wLjE4OCIsIm5hbWUiOiJEYXZpZCBOZXdtYW4iLCJvaWQiOiIxZWJhMjM0NS1mYzcxLTRmZjQtODljYS0yMDE5NWM2YTdjYWMiLCJwdWlkIjoiMTAwMzNGRkY5NjFFRkQ2NyIsInNjcCI6IkNhbGVuZGFycy5SZWFkIENhbGVuZGFycy5SZWFkV3JpdGUgQ29udGFjdHMuUmVhZCBDb250YWN0cy5SZWFkV3JpdGUgRXhjaGFuZ2UuTWFuYWdlIGZ1bGxfYWNjZXNzX2FzX3VzZXIgR3JvdXAuUmVhZC5BbGwgR3JvdXAuUmVhZFdyaXRlLkFsbCBNYWlsLlJlYWQgTWFpbC5SZWFkV3JpdGUgTWFpbC5TZW5kIE1haWxib3hTZXR0aW5ncy5SZWFkV3JpdGUgUGVvcGxlLlJlYWQgUGVvcGxlLlJlYWRXcml0ZSBUYXNrcy5SZWFkIFRhc2tzLlJlYWRXcml0ZSBVc2VyLlJlYWRCYXNpYy5BbGwiLCJzdWIiOiJ5UFZpVHVSQm83QjZTMUhuNXZ1cUY3czAzRVRMSkNGMW9UVmp6eVZIQmVvIiwidGlkIjoiNTM0MTFiOGItMWRlOC00ZDAyLTk3ZmMtNzAxMGJhZDVmMjI2IiwidW5pcXVlX25hbWUiOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ1cG4iOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ2ZXIiOiIxLjAifQ.DQIV1RNYAkphRjlWmauDcz1ChBaAYAOcisq9IOulqC33ae7a1sUN84bfv5H97ipIHRNE7RobJaUmQ0BmTYnD9Vzda1X5mVNFkIfx6Zms2lu-rGnnmA25IIilLBw9VA2L3ENHvxprp0tzauGzpwC7XHHuhaaU_strjJcDQFYJxTE9b-9_jvzsWUm8mh1bqIMxM4VypqWeMUbFSoSaWFSpgSrU_6Ewn2WJ2sgboIzGDjdCZChJunM7SeFaTIeBC1GZtc2z0qbpv53RrVU9Eu0LilhRptNGSRx7kMrw4L5Y-QcRG9YucWd7cFKFVWIE8hugb2wNg5caDn0oTVsYJTAXWA";
+            xhttpPost.open("POST", "https://outlook.office.com/api/v1.0/me/events", true);
+              
+           
+            xhttpPost.setRequestHeader("Authorization", "Bearer " + acquireToken);
+            xhttpPost.setRequestHeader("Content-type", "application/json");
+            //xhttpPost.setRequestHeader("X-AnchorMailbox", "david@danewman.onmicrosoft.com");
+          
+                // console.log("data" + requestData);
+                //var options = getRequestBodyOptions();
+                //console.log(options);
+                //xhttpPost.send(options);
+
+     
+            xhttpPost.send('{ "Subject":' + '"' + meetingSubject.value + '",' + '"Body": { "ContentType": "HTML", "Content":' + '"' + str + '"}' + ',"Start":' + '"' + meetingstartDate.value + 'T' + meetingstartTime.value + ':00-08:00' + '"' + ',"StartTimeZone": "Pacific Standard Time","End":' + '"' + meetingendDate.value + 'T' + meetingendTime.value + ':00-08:00' + '"' + ',"EndTimeZone": "Pacific Standard Time"' + ',"Attendees": [ { "EmailAddress": { "Address": "aravin@microsoft.com","Name": "Aravind Namasivayam"},"Type": "Required"}]}');
+
+            xhttpPost.onreadystatechange = function () {
+                if (xhttpPost.readyState == 4 && xhttpPost.status == 201) {
+                    var data = xhttpPost.responseText;
+                    var jsonResponse = JSON.parse(data);
+                    console.log("Weblink" + jsonResponse["WebLink"]);
+                    document.getElementById("demo").innerHTML = jsonResponse["WebLink"];
+                    //document.getElementById("popupsaveschedulemeeting").onclick = function () {
+                    location.href = jsonResponse["WebLink"];
+
+                    //function popitup(url) {
+                    //    newwindow = window.open(jsonResponse["WebLink"], 'name', 'height=600,width=650');
+                    //    if (window.focus) { newwindow.focus() }
+                    //    return false;
+                    //}
+
+               
+                    //}
+                }
+            }
+
+            var mapWin = window.open(jsonResponse["WebLink"], "_blank", "toolbar=yes, scrollbars=yes, resizable=yes, top=500, left=500, width=1200, height=800"); // Opens a popup   
+
+            setWindowTitle(mapWin) // Starts checking
+
+            function setWindowTitle(mapWin) {
+                if (mapWin.document) // If loaded
+                {
+                    mapWin.document.title = "sdf";
+                }
+                else // If not loaded yet
+                {
+                    setTimeout(setWindowTitle, 10); // Recheck again every 10 ms
+                }
+            }
+
+          //  window.open(jsonResponse["WebLink"], "_blank", "toolbar=yes, scrollbars=yes, resizable=yes, top=500, left=500, width=1200, height=800");
+
+            //$('#dashboardoutput').append(meeting.onlineMeetingUri() + "<br>");
+            //    //  $('#dashboardoutput').append(meeting.joinUrl() + "<br>");
+            //var str = meeting.joinUrl();
+            //var onlineMeetingURL = str.link(meeting.joinUrl());
+            //$('#dashboardoutput').append(onlineMeetingURL);
+            //displayOutput(str);
+
+
+            //function outlookUrl() {
+            //    window.open(jsonResponse["WebLink"]);
+            //}
 
             }
         });
 
+
+        //$('#outlook').click(function () {
+
+            
+        //    function getRequestBodyOptions() {
+        //        var optionsBody = {
+
+        //            Subject: "TESTING IGNORE CALENDAR EVENT CREATED",
+        //            Body: {
+        //                ContentType: "HTML",
+        //                Content: "I think it wil"
+        //            }
+        //        }
+        //        return optionsBody;
+        //    };
+
+            
+        //    var test = getRequestBodyOptions();
+            
+        //    console.log("starts test" + test.Subject);
+            
+        //    //// JSON to be passed 
+        //    var requestData = {
+                
+        //    "Subject": "TESTING IGNORE CALENDAR EVENT CREATED",
+        //            "Body": {
+        //                "ContentType": "HTML",
+        //                "Content": "I think it will meet our requirements! SENT VIA OUTLOOK REST API CODE"
+        //            },
+        //            //"Start": {
+        //            //    "DateTime": "2016-03-03T18:00:00",
+        //            //    "TimeZone": "Pacific Standard Time"
+        //            //},
+        //            //"End": {
+        //            //    "DateTime": "2016-03-03T19:00:00",
+        //            //    "TimeZone": "Pacific Standard Time"
+        //            //},
+        //            "Attendees": [
+        //              {
+        //                  "EmailAddress": {
+        //                      "Name": "Aravind Namasivayam",
+        //                      "Address": "aravin@microsoft.com"
+        //                  },
+        //                  "Type": "Required"
+        //              }
+        //            ]
+        //        }
+            
+
+        //    //// Outlook calendar event create REST API URL (I censored my api key)
+        //    //url = "https://outlook.office.com/api/v1.0/me/events"
+
+        //    //// POST request
+        //    //request({
+        //    //    url: url,
+        //    //    method : "POST",
+        //    //    json: requestData,
+        //    //    headers: {
+        //    //                'content-type': 'application/json',
+        //    //                'Authorization': 'Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSIsImtpZCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSJ9.eyJhdWQiOiJodHRwczovL291dGxvb2sub2ZmaWNlLmNvbSIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzUzNDExYjhiLTFkZTgtNGQwMi05N2ZjLTcwMTBiYWQ1ZjIyNi8iLCJpYXQiOjE0NTcwMjgyNTgsIm5iZiI6MTQ1NzAyODI1OCwiZXhwIjoxNDU3MDMyMTU4LCJhY3IiOiIxIiwiYW1yIjpbInB3ZCJdLCJhcHBpZCI6IjNmMzAzYmJiLTRkNWYtNDVjMi1hZDJiLTcwMzRjMTZmMzhiNiIsImFwcGlkYWNyIjoiMCIsImZhbWlseV9uYW1lIjoiTmV3bWFuIiwiZ2l2ZW5fbmFtZSI6IkRhdmlkIiwiaXBhZGRyIjoiMTA3LjE0Ny40LjI0MCIsIm5hbWUiOiJEYXZpZCBOZXdtYW4iLCJvaWQiOiIxZWJhMjM0NS1mYzcxLTRmZjQtODljYS0yMDE5NWM2YTdjYWMiLCJwdWlkIjoiMTAwMzNGRkY5NjFFRkQ2NyIsInNjcCI6IkNhbGVuZGFycy5SZWFkIENhbGVuZGFycy5SZWFkV3JpdGUgQ29udGFjdHMuUmVhZCBDb250YWN0cy5SZWFkV3JpdGUgRXhjaGFuZ2UuTWFuYWdlIGZ1bGxfYWNjZXNzX2FzX3VzZXIgR3JvdXAuUmVhZC5BbGwgR3JvdXAuUmVhZFdyaXRlLkFsbCBNYWlsLlJlYWQgTWFpbC5SZWFkV3JpdGUgTWFpbC5TZW5kIE1haWxib3hTZXR0aW5ncy5SZWFkV3JpdGUgUGVvcGxlLlJlYWQgUGVvcGxlLlJlYWRXcml0ZSBUYXNrcy5SZWFkIFRhc2tzLlJlYWRXcml0ZSBVc2VyLlJlYWRCYXNpYy5BbGwiLCJzdWIiOiJ5UFZpVHVSQm83QjZTMUhuNXZ1cUY3czAzRVRMSkNGMW9UVmp6eVZIQmVvIiwidGlkIjoiNTM0MTFiOGItMWRlOC00ZDAyLTk3ZmMtNzAxMGJhZDVmMjI2IiwidW5pcXVlX25hbWUiOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ1cG4iOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ2ZXIiOiIxLjAifQ.W0sH16jd0iZL54ch4G76aKNMnL5aEtLNPIg_wtmERwt7NCSLkfMJ0fDvCr1s_QM-mr43h2OmUNJ1pfvNg5zrP373NuhieQmKaPHmuen21pf3IucqVKMnd0pBbsW4JFBvmQ9Rk47ShvyFlYrdda7xobfgOBazlquNBbAsfRu3ZiLieCMo8rgt0eDHygTV1nTn2Ps7Hj1V3GP-hWecQL9_VdBJKclIlAU8D05vYAdYCsyLkvi4j9HiBRP_PuWhENoM5OavOmmDUtN7JkWGD7O2xnJV7_N1G6fFVh3ZXyRQgs5xNrBn9dQzrGMbA4o-ODe10In2UV-G2qFIigwx_qlfgg',
+        //    //                'X-AnchorMailbox' : 'david@danewman.onmicrosoft.com',
+        //    //    },
+        //    //}, function (error, response, body) {
+        //    //    if (!error && response.statusCode === 201) {
+        //    //        console.log(body)
+        //    //    }
+        //    //    else {
+        //    //        console.log("error: " + error)
+        //    //        console.log("response.statusCode: " + response.statusCode)
+        //    //        console.log("response.statusText: " + response.statusText)
+        //    //    }
+        //    //})
+
+        //    //var xhttpGet = new XMLHttpRequest();
+        //    //xhttpGet.onreadystatechange = function () {
+        //    //    if (xhttpGet.readyState == 4 && xhttpGet.status == 200) {
+        //    //        document.getElementById("demo").innerHTML = xhttpGet.responseText;
+        //    //    }
+        //    //};
+        //    //xhttpGet.open("GET", "https://outlook.office.com/api/v1.0/me", true);
+        //    //xhttpGet.setRequestHeader("Content-type", "application/json");
+        //    //xhttpGet.setRequestHeader("Authorization", "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSIsImtpZCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSJ9.eyJhdWQiOiJodHRwczovL291dGxvb2sub2ZmaWNlLmNvbSIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzUzNDExYjhiLTFkZTgtNGQwMi05N2ZjLTcwMTBiYWQ1ZjIyNi8iLCJpYXQiOjE0NTcwMTM0OTYsIm5iZiI6MTQ1NzAxMzQ5NiwiZXhwIjoxNDU3MDE3Mzk2LCJhY3IiOiIxIiwiYW1yIjpbInB3ZCJdLCJhcHBpZCI6IjNmMzAzYmJiLTRkNWYtNDVjMi1hZDJiLTcwMzRjMTZmMzhiNiIsImFwcGlkYWNyIjoiMCIsImZhbWlseV9uYW1lIjoiTmV3bWFuIiwiZ2l2ZW5fbmFtZSI6IkRhdmlkIiwiaXBhZGRyIjoiMTA3LjE0Ny40LjI0MCIsIm5hbWUiOiJEYXZpZCBOZXdtYW4iLCJvaWQiOiIxZWJhMjM0NS1mYzcxLTRmZjQtODljYS0yMDE5NWM2YTdjYWMiLCJwdWlkIjoiMTAwMzNGRkY5NjFFRkQ2NyIsInNjcCI6IkNhbGVuZGFycy5SZWFkIENhbGVuZGFycy5SZWFkV3JpdGUgQ29udGFjdHMuUmVhZCBDb250YWN0cy5SZWFkV3JpdGUgRXhjaGFuZ2UuTWFuYWdlIGZ1bGxfYWNjZXNzX2FzX3VzZXIgR3JvdXAuUmVhZC5BbGwgR3JvdXAuUmVhZFdyaXRlLkFsbCBNYWlsLlJlYWQgTWFpbC5SZWFkV3JpdGUgTWFpbC5TZW5kIE1haWxib3hTZXR0aW5ncy5SZWFkV3JpdGUgUGVvcGxlLlJlYWQgUGVvcGxlLlJlYWRXcml0ZSBUYXNrcy5SZWFkIFRhc2tzLlJlYWRXcml0ZSBVc2VyLlJlYWRCYXNpYy5BbGwiLCJzdWIiOiJ5UFZpVHVSQm83QjZTMUhuNXZ1cUY3czAzRVRMSkNGMW9UVmp6eVZIQmVvIiwidGlkIjoiNTM0MTFiOGItMWRlOC00ZDAyLTk3ZmMtNzAxMGJhZDVmMjI2IiwidW5pcXVlX25hbWUiOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ1cG4iOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ2ZXIiOiIxLjAifQ.afFTezYQFRZLoG5kHtk5iFTW6MUoMazH5EDQpz1QJaMjGESfXaf_ylsg_1p2A87iVOYoB546FeJ9RhhYm03YVycjMep22-Yy6-FNlDyM6c__raMEB3Z_XCYKKDgFaP4BcfkRvcLlAN3xvNeFpjZJnFC_zLwo7VBGyCrRFWkAX3RuzJFh2wLu0PQi1Ath6fYidhD_2zsNCne5DdWZvDAuBYEPpFm_r3LT1TGdHw48cGo-9btZw_LI2Hd1tyiv48DHUaTRXJFeVZCiYT7VLe2SfSh-PPU1aUqn7eeatGNH_jUKXEY__BFFINvpncrC5WGw354aMRS84VY3EBLWxzTTNQ");
+        //    //xhttpGet.setRequestHeader("X-AnchorMailbox", "david@danewman.onmicrosoft.com");
+        //    //xhttpGet.send();
+
+        //    var xhttpPost = new XMLHttpRequest();
+        //    xhttpPost.onreadystatechange = function () {
+        //        if (xhttpPost.readyState == 4 && xhttpPost.status == 201) {
+        //            var data = xhttpPost.responseText;
+        //            var jsonResponse = JSON.parse(data);
+        //            console.log("Weblink" + jsonResponse["WebLink"]);
+        //            document.getElementById("demo").innerHTML = jsonResponse["WebLink"];
+        //            document.getElementById("scheduleRest").onclick = function () {
+        //                location.href = jsonResponse["WebLink"];
+
+                     
+        //            }
+        //        }
+        //    };
+        //    xhttpPost.open("POST", "https://outlook.office.com/api/v1.0/me/events", true);
+        //    xhttpPost.setRequestHeader("Content-type", "application/json"); 
+        //    xhttpPost.setRequestHeader("Authorization", "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiIsIng1dCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSIsImtpZCI6Ik1uQ19WWmNBVGZNNXBPWWlKSE1iYTlnb0VLWSJ9.eyJhdWQiOiJodHRwczovL291dGxvb2sub2ZmaWNlLmNvbSIsImlzcyI6Imh0dHBzOi8vc3RzLndpbmRvd3MubmV0LzUzNDExYjhiLTFkZTgtNGQwMi05N2ZjLTcwMTBiYWQ1ZjIyNi8iLCJpYXQiOjE0NTc1Njc2NjQsIm5iZiI6MTQ1NzU2NzY2NCwiZXhwIjoxNDU3NTcxNTY0LCJhY3IiOiIxIiwiYW1yIjpbInB3ZCJdLCJhcHBpZCI6IjNmMzAzYmJiLTRkNWYtNDVjMi1hZDJiLTcwMzRjMTZmMzhiNiIsImFwcGlkYWNyIjoiMCIsImZhbWlseV9uYW1lIjoiTmV3bWFuIiwiZ2l2ZW5fbmFtZSI6IkRhdmlkIiwiaXBhZGRyIjoiMTY3LjIyMC4xLjE4OCIsIm5hbWUiOiJEYXZpZCBOZXdtYW4iLCJvaWQiOiIxZWJhMjM0NS1mYzcxLTRmZjQtODljYS0yMDE5NWM2YTdjYWMiLCJwdWlkIjoiMTAwMzNGRkY5NjFFRkQ2NyIsInNjcCI6IkNhbGVuZGFycy5SZWFkIENhbGVuZGFycy5SZWFkV3JpdGUgQ29udGFjdHMuUmVhZCBDb250YWN0cy5SZWFkV3JpdGUgRXhjaGFuZ2UuTWFuYWdlIGZ1bGxfYWNjZXNzX2FzX3VzZXIgR3JvdXAuUmVhZC5BbGwgR3JvdXAuUmVhZFdyaXRlLkFsbCBNYWlsLlJlYWQgTWFpbC5SZWFkV3JpdGUgTWFpbC5TZW5kIE1haWxib3hTZXR0aW5ncy5SZWFkV3JpdGUgUGVvcGxlLlJlYWQgUGVvcGxlLlJlYWRXcml0ZSBUYXNrcy5SZWFkIFRhc2tzLlJlYWRXcml0ZSBVc2VyLlJlYWRCYXNpYy5BbGwiLCJzdWIiOiJ5UFZpVHVSQm83QjZTMUhuNXZ1cUY3czAzRVRMSkNGMW9UVmp6eVZIQmVvIiwidGlkIjoiNTM0MTFiOGItMWRlOC00ZDAyLTk3ZmMtNzAxMGJhZDVmMjI2IiwidW5pcXVlX25hbWUiOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ1cG4iOiJEYXZpZEBkYW5ld21hbi5vbm1pY3Jvc29mdC5jb20iLCJ2ZXIiOiIxLjAifQ.I2nIyIwLL1LlXM4qMP1TIHFpGFgYWVDuPs8fa1WSj5lVPh-flkO4GBLgauyWtKcoHXN1fUtiiCcJwuVYhV0Ah217vIedfI6S7vo28Ay6yLwtWzKLOWWnKsoIZDkd2blrypH0qiJWSda22Qf-NLEY_eAP3r6u3kKW8pU9TETWGaQEsbGypjCECQVZsvJ4-CnTJ-n1MGB1tD0MofWiXT3uQm16GEusySiQbivE2fq5z2dCtxN6xKXumN7Ejn56ldUNhJ7VYVeUarAFAvUuiNJ6kWQ5EroYAknGBNxiiFGaiVCeAEktsh8kuqpf1fu8hhjsnq6pC6xP6_lfaVU69lwE2Q");
+        //    xhttpPost.setRequestHeader("X-AnchorMailbox", "david@danewman.onmicrosoft.com");
+
+        //    // console.log("data" + requestData);
+        //    //var options = getRequestBodyOptions();
+        //    //console.log(options);
+        //    //xhttpPost.send(options);
+            
+        //    xhttpPost.send('{ "Subject": "Skype Meeting Tesla CloudHub + Anypoint Connectors Test","Attendees": [ { "EmailAddress": { "Address": "aravin@microsoft.com","Name": "Aravind Namasivayam"},"Type": "Required"}]}');
+            
+            
+
+        //    //xhttpPost.send('Subject=Discuss the Calendar REST API' + 'Body=I think it will meet our requirements');
+        //    //var json_data = xhttpPost.responseText;
+        //    //console.log("Text" + xhttpPost.responseText);
+        //    //console.log("Body" + xhttpPost.responseBody);
+        //    //console.log("Type" + xhttpPost.responseType);
+        //    //console.log("XML" + xhttpPost.responseXML);
+
+           
+
+        //   // console.log("response data url" + json_data);
+            
+
+
+        //    //console.log (xhttp.getResponseHeader(name));
+           
+        //    //var http = require('http');
+
+        //    //var app = http.createServer(function (req, res) {
+        //    //    res.setHeader('Content-Type', 'application/json');
+        //    //    res.send(JSON.stringify({ a: 1 }, null, 3));
+        //    //});
+        //    //app.listen(3000);
+
+        //    //console.log("TEXT"+ xhttp.responseText);
+        //    //console.log("RESPONSE" + xhttp.response);
+        //    //console.log("Body" + xhttp.responseBody);
+
+        //    //log("Refresh token" + AuthModule_1.refreshToken);
+        //    //log("Actual token" + AuthModule_1.Token);
+        //    //$.post("");
+
+        //    function outlookUrl() {
+        //        window.open(jsonResponse["WebLink"]);
+        //    }
+
+          
+        //});
+
         // when the user clicks on the "Sign Out" button
         $('#signout').click(function () {
             // start signing out
+           
+
             log("Signing Out");
             client.signInManager.signOut().then(
                     //onSuccess callback

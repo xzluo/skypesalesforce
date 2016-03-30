@@ -19,7 +19,11 @@
     <!--<script src="view.js"></script>-->
     <!-- Styles for this demonstration -->
     <!--<script src="app.js"></script>-->
-    <script src="../libs/jquery.js"></script>
+    <!-- <script src="../libs/jquery.js"></script> -->
+<!--     <script src="../libs/adal.js"></script>
+    <script src="../libs/angular.js"></script>
+    <script src="../libs/adal-angular.js"></script>
+    <script src="../utils/app-angular.js"></script> -->
 
     <link href="index.css" rel="stylesheet">
 </head>
@@ -39,6 +43,10 @@
             <div class="col-md-6">
                 <div id="loginbox">
                     <div id="signin" class="button">Sign In</div>
+                    <div id="authorizeToOffice" class="button">authorizeToOffice</div>
+
+<!--                     <div id="authorizeToOffice" class="button" ng-app="ssi3App" ng-controller="authController"><button ng-click="login()">authorizeToOffice</button></div>
+ -->
                     <div id="implicitsignin" class="button">Authorize to use SfB Online</div>
                     <div class="signinframe">
                         <br />
@@ -170,8 +178,10 @@
 
                     </div>
                     <div>
-                        <div id="save" class="button button1" onclick="myOnlinemeetingurl()">Save</div>
+                        <!--<div id="save" class="button button1" onclick="myOnlinemeetingurl()">Save</div>-->
+                        <div id="save" class="button button1" >Save</div>
                         <div id="popupsaveschedulemeeting" class="button button1">Schedule</div>
+                        <div id="outlook" class="button button1">Outlook REST</div>
 
 
 

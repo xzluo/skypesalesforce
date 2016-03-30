@@ -56,9 +56,18 @@ define(["require", "exports", '../utils/UrlParser'], function (require, exports,
         // Constants.AzureADInstanceUrl = "https://login.windows-ppe.net/";
         // Constants.AzureADTenant = "lyncnadbr.ccsctp.net";
         // Constants.AzureClientId = "c050aba1-6509-4a0a-81f9-7ec4c0667010"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
+
+        //ssiprod tenant expires 4/28/2016
         Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
-        Constants.AzureADTenant = "danewman.onmicrosoft.com";
-        Constants.AzureClientId = "3f303bbb-4d5f-45c2-ad2b-7034c16f38b6"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
+        Constants.AzureADTenant = "ssiprod.onmicrosoft.com";
+        Constants.AzureClientId = "9de6b775-994c-44a2-973d-fd28189ccfaf"; 
+
+        //David newman tenant
+        //Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
+        //Constants.AzureADTenant = "danewman.onmicrosoft.com";
+        //Constants.AzureClientId = "3f303bbb-4d5f-45c2-ad2b-7034c16f38b6"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
+        ///****************/
+        Constants.ResourceUrl = "https://outlook.office.com";
 
         // Meeting Access level
         Constants.MeetingAccessLevelAnonymous = "Anonymous";
