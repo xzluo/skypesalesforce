@@ -98,35 +98,20 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
         $('#saveMeetingEvents').hide();
 
         var meeting;
-        var Application;
+        var Application
         var client;
 
-   
-
-        function initializeSkypeApi() {
-            Skype.initialize({
-                apiKey: 'a42fcebd-5b43-4b89-a065-74450fb91255',
-            }, function (api) {
-                Application = api.application;
-                createApp()
-                //client = new Application();
-                log("Client Created");
-            }, function (err) {
-                log('some error occurred: failed' + err);
-            });
-        }
+        Skype.initialize({
+            apiKey: 'a42fcebd-5b43-4b89-a065-74450fb91255',
+        }, function (api) {
+            Application = api.application;
+            client = new Application();
+            log("Client Created");
+        }, function (err) {
+            log('some error occurred: failed' + err);
+        });
 
 
-        function createApp() {
-            client = new Application({
-               
-            });
-            // whenever client.state changes, display its value
-            client.signInManager.state.changed(function (state) {
-                $('#client_state').text(state);
-            });
-        }
-        initializeSkypeApi();
 
         // SIGN IN FLOW
         $('#authorizeToOffice').click(function () {
@@ -230,10 +215,8 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
                 // client_id: 'c050aba1-6509-4a0a-81f9-7ec4c0667010',
                 //client_id: '3f303bbb-4d5f-45c2-ad2b-7034c16f38b6', //Davi newman tenant id
                 //  oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=danewman.onmicrosoft.com',
-              //  client_id: '9de6b775-994c-44a2-973d-fd28189ccfaf', //ssiprod tenant expires 4/28/2016
-                client_id: 'a756b19c-7b93-4811-80dc-ba33dc8a023b', //ssiprod tenant expires 4/28/2016
-                // oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=ssiprod.onmicrosoft.com',
-                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=SSIPRODTESTE3.onmicrosoft.com',
+                client_id: '9de6b775-994c-44a2-973d-fd28189ccfaf', //ssiprod tenant expires 4/28/2016
+                oauth_uri: 'https://login.microsoftonline.com/common/oauth2/authorize?domain_hint=ssiprod.onmicrosoft.com',
                 // oauth_uri: 'https://login.windows-ppe.net/common/oauth2/authorize?domain_hint=lyncnadbr.ccsctp.net',
                 origins: origins,
             }
@@ -889,64 +872,29 @@ define(["require", "exports", './utils/Logger', "./utils/Constants", './utils/Au
           
         //});
 
-        $('#signout').click(function () {
-
-            // start signing out
-   
-
-            client.signInManager.signOut().then(function () {
-                // and report the success
-
-                log('Signed out');
-                AuthModule_1.default.instance.logout(function (error) {
-                    Logger_1.default.log("calling log out" + error);
-
-                });
-                $('#loginbox').show();
-                $('#signin').show();
-                $('#signout').hide();
-                $('#userdetails').hide();
-                log("clearing all cache");
-
-   
-            }, function (error) {
-                // or a failure
-                log('Cannot Signed out' + error);
-            }).finally(function () {
-                log("Success");
-                //calling auth logout
-
-                // it's better to not reuse the same app instance
-                // across multiple sign in calls to avoid possible
-                // interference of the previous app's state
-               createApp();
-               
-            });
-        });
-
         // when the user clicks on the "Sign Out" button
-        //$('#signout').click(function () {
-        //    // start signing out
+        $('#signout').click(function () {
+            // start signing out
            
 
-        //    log("Signing Out");
-        //    client.signInManager.signOut().then(
-        //            //onSuccess callback
-        //            function () {
-        //                // and report the success
-        //                log('Signed out');
-        //                $('#loginbox').show();
-        //                $('#signin').show();
-        //                $('#signout').hide();
-        //                $('#userdetails').hide();
-        //                client = new Application();
-        //            },
-        //        //onFailure callback
-        //        function (error) {
-        //            // or a failure
-        //            log(error || 'Cannot Sign Out');
-        //        });
-        //});
+            log("Signing Out");
+            client.signInManager.signOut().then(
+                    //onSuccess callback
+                    function () {
+                        // and report the success
+                        log('Signed out');
+                        $('#loginbox').show();
+                        $('#signin').show();
+                        $('#signout').hide();
+                        $('#userdetails').hide();
+                        client = new Application();
+                    },
+                //onFailure callback
+                function (error) {
+                    // or a failure
+                    log(error || 'Cannot Sign Out');
+                });
+        });
     })();
 
 });
