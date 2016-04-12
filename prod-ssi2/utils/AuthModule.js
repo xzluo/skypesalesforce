@@ -27,7 +27,8 @@ define(["require", "exports", './Logger', "../utils/Constants"], function (requi
                 cacheLocation: 'localStorage',
                 redirectUri: window.location.href,
                 // resource: 'https://webdir0d.tip.lync.com'
-                resource: 'https://outlook.office.com'
+                resource: 'https://outlook.office.com',
+                postLogoutRedirectUri : 'https://www.yourapp.com'
             });
 
             // Check For & Handle Redirect From AAD After Login

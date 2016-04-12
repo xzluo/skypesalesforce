@@ -58,9 +58,15 @@ define(["require", "exports", '../utils/UrlParser'], function (require, exports,
         // Constants.AzureClientId = "c050aba1-6509-4a0a-81f9-7ec4c0667010"; //"e4dac4cd-21a8-49cc-81c4-91a3670f767a";
 
         //ssiprod tenant expires 4/28/2016
+        //Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
+        //Constants.AzureADTenant = "ssiprod.onmicrosoft.com";
+        //Constants.AzureClientId = "9de6b775-994c-44a2-973d-fd28189ccfaf"; 
+
+
         Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
-        Constants.AzureADTenant = "ssiprod.onmicrosoft.com";
-        Constants.AzureClientId = "9de6b775-994c-44a2-973d-fd28189ccfaf"; 
+        Constants.AzureADTenant = "SSIPRODTESTE3.onmicrosoft.com";
+        Constants.AzureClientId = "a756b19c-7b93-4811-80dc-ba33dc8a023b";
+
 
         //David newman tenant
         //Constants.AzureADInstanceUrl = "https://login.microsoftonline.com/";
